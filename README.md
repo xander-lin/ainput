@@ -58,6 +58,20 @@ ninja -C build
 sudo meson install -C build
 ```
 
+The package installs `/usr/lib/udev/rules.d/70-vinput-uinput.rules`. Vinput
+needs write access to `/dev/uinput` to inject a synthetic CapsLock
+press+release after push-to-talk; without it the physical key leaves CapsLock
+locked on. The rule uses systemd-logind's `uaccess` tag, so any user with an
+active local session gets access automatically — no group membership, no
+per-user setup, and newly created accounts work too. After a manual
+`meson install`, run `udevadm control --reload` and
+`udevadm trigger --subsystem-match=misc --sysname-match=uinput` once, then
+restart fcitx5 (`fcitx5 -r`).
+
+Verify with `getfacl /dev/uinput`: a working setup shows a `user:<you>:rw-`
+entry. If it is missing, CapsLock restore is disabled and the fcitx5 log
+contains `cannot open /dev/uinput`.
+
 ### 2. Configure (cloud ASR)
 
 Defaults are built into the code; config files under `~/.config/vinput/` are optional and sparse. Copy only what you need, and keep in mind every file supports `//` comments:
@@ -218,6 +232,10 @@ utterances fast without exposing knobs nobody should turn.
 | libcurl | `curl` |
 | speexdsp | `speexdsp` |
 | libsoxr | `libsoxr` |
+
+CapsLock restore additionally needs write access to `/dev/uinput`, granted to
+local sessions by the shipped udev rule (see [Install](#1-install)). Voice
+input still works without it; only the CapsLock state restore is lost.
 
 ## Audio Pipeline
 

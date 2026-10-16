@@ -1,0 +1,17 @@
+# fcitx5-vinput — grant local users write access to /dev/uinput.
+#
+# The addon opens /dev/uinput once at load time to create a persistent virtual
+# keyboard, and injects a single synthetic CapsLock press+release after each
+# push-to-talk. That is how the physical key, which the kernel/compositor
+# already used to toggle the lock, gets its CapsLock state restored.
+#
+# TAG+="uaccess" delegates the decision to systemd-logind: whoever holds the
+# active session on a local seat gets a per-uid ACL on the node. This covers
+# every local user automatically — including accounts created after this
+# package was installed — with no group membership, no re-login, and without
+# granting read access to the keyboard event devices (/dev/input/event*).
+#
+# OPTIONS+="static_node=uinput" is mandatory here: /dev/uinput is a static node
+# created by systemd-tmpfiles at boot, and plain udev rules do not touch static
+# nodes without it.
+KERNEL=="uinput", SUBSYSTEM=="misc", OPTIONS+="static_node=uinput", TAG+="uaccess"

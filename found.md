@@ -158,3 +158,45 @@
     only works in a build directory, generate there and copy the result back.
   - `git add -A` will happily stage empty files; check `git diff --cached
     --stat` for suspicious deletions of line counts before committing.
+
+## 9. CapsLock restore depended on a udev rule the project never shipped
+  (found 2026-10)
+
+- **Mistake/context**: On one machine (x18) CapsLock stopped being restored
+  after push-to-talk: press CapsLock, release, and the lock stayed on — while
+  another machine (x19) running the same build was fine. Nothing in the code
+  had changed; the regression had no visible date.
+- **Root cause**: `VinputAddon::revertCapsLock()` needs write access to
+  `/dev/uinput` to inject a synthetic CapsLock press+release. `/dev/uinput` is
+  a **static node** created by systemd-tmpfiles at boot and left at
+  `0600 root:root` unless some udev rule chgrps it. The project never shipped
+  such a rule, so the capability silently depended on an unrelated package's
+  rule (on x19 `ydotool`'s `80-uinput.rules` did it, and the login user
+  happened to be in the `input` group). On x18 none of those packages were
+  installed, `initUinput()` hit `open() = EACCES` and only logged
+  `Vinput: cannot open /dev/uinput` at INFO level — voice input still worked
+  perfectly, so the failure looked like "the fix mysteriously disappeared".
+- **Correction**: Shipped `udev/70-vinput-uinput.rules`
+  (`KERNEL=="uinput", SUBSYSTEM=="misc", OPTIONS+="static_node=uinput",
+  TAG+="uaccess"`), installed by meson into `lib/udev/rules.d`, plus a udev
+  reload in `PKGBUILD.install`.
+- **Prevention**:
+  - When a feature depends on an OS-level prerequisite (device node, kernel
+    module, group, capability), the **package must provide** that
+    prerequisite; never rely on another package happening to configure it.
+  - For "every local user, including future ones" access, use
+    `TAG+="uaccess"` (systemd-logind grants the active seat session), not
+    `GROUP=` + `usermod`: groups are per-user data and cannot cover accounts
+    created later without extra machinery. Avoid `input` group for this — it
+    also grants read access to every `/dev/input/event*` (keylogging).
+  - A device node is an ordinary file node: permissions are normal POSIX
+    mode/ACL, but `/dev` is devtmpfs, so anything set by hand is reset at boot
+    (see the `c!` entries in `/run/tmpfiles.d/static-nodes.conf`). Persistent
+    changes must come from udev/tmpfiles rules.
+  - `static_node=` is mandatory for `/dev/uinput`; rules without it do not
+    touch static nodes (udev(7)).
+  - Watch for capabilities that fail **silently and degradedly**: verify the
+    prerequisite after install, and prefer a loud, actionable error over an
+    INFO log. `getfacl /dev/uinput` showing a `user:<you>:rw-` line is the
+    one-command check.
+

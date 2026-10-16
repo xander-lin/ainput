@@ -59,6 +59,15 @@ who want fast push-to-talk dictation without leaving the keyboard.
   into code constants in 2026-10 (doubao keeps one whole-budget
   `timeout_sec`). New knobs need a justification, not just "might be
   useful".
+- OS prerequisites are shipped, not assumed. CapsLock restore injects a
+  synthetic CapsLock press+release through `/dev/uinput`; the package must
+  therefore provide the udev rule that makes that node writable
+  (`udev/70-vinput-uinput.rules`, installed by meson). It uses
+  `TAG+="uaccess"` so every local user with an active session — including
+  accounts created after installation — works with no group membership, and
+  without granting read access to `/dev/input/event*`. Losing this rule makes
+  CapsLock restore fail **silently** while voice input still works (see
+  `found.md` #9).
 
 ## Project Principles
 
@@ -71,7 +80,9 @@ who want fast push-to-talk dictation without leaving the keyboard.
   manual extraction). Keep it minimal but robust to field order.
 - Build: meson (`meson.build`, `meson_options.txt`, per-dir `meson.build`).
   Packaging: PKGBUILD (Arch). Verification: `ninja -C build` + tests under
-  `tests/`.
+  `tests/`. Meson install carries the fcitx5 addon files **and** the udev
+  rule (`lib/udev/rules.d`); `PKGBUILD.install` reloads udev on
+  install/upgrade.
 - Release chain: repo → GitHub (`origin`) + Gitee (`gitee`, PKGBUILD source) →
   AUR (`aur/fcitx5-vinput-git`). For a `-git` package AUR and paru can only
   display the **static** `pkgver=` placeholder (they cannot run `pkgver()`),

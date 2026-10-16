@@ -32,6 +32,7 @@
 #include <fstream>
 #include <optional>
 #include <string_view>
+#include <cerrno>
 
 // Vinput ASR provider 接口
 #include "asr_provider.h"
@@ -184,7 +185,17 @@ private:
     void initUinput() {
         uinputFd_ = open("/dev/uinput", O_WRONLY | O_NONBLOCK);
         if (uinputFd_ < 0) {
-            FCITX_INFO() << "Vinput: cannot open /dev/uinput";
+            // CapsLock restore silently stops working without this, while the
+            // rest of voice input keeps functioning — so fail loudly and point
+            // at the shipped udev rule instead of looking like a broken key.
+            FCITX_WARN() << "Vinput: cannot open /dev/uinput (errno=" << errno
+                         << "); CapsLock restore disabled. Install/enable "
+                            "70-vinput-uinput.rules and run "
+                            "'udevadm control --reload && udevadm trigger "
+                            "--subsystem-match=misc --sysname-match=uinput'.";
+            vinput::diagnosticLog().event("adapter", "uinput_open_failed", {
+                {"errno", std::to_string(errno)}
+            });
             return;
         }
         ioctl(uinputFd_, UI_SET_EVBIT, EV_KEY);
@@ -198,6 +209,7 @@ private:
         ioctl(uinputFd_, UI_DEV_SETUP, &usetup);
         ioctl(uinputFd_, UI_DEV_CREATE);
         FCITX_INFO() << "Vinput uinput device created";
+        vinput::diagnosticLog().event("adapter", "uinput_device_created");
     }
 
     // 还原 CapsLock — 通过 uinput 虚键发送 CapsLock (还原 LED, 会触发 IM 切换但马上恢复)

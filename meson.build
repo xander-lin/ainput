@@ -12,3 +12,9 @@ subdir('tools')
 subdir('adapter')
 
 install_man('docs/vinput.1')
+
+# CapsLock restore needs /dev/uinput (see udev/70-vinput-uinput.rules).
+# TAG+="uaccess" lets systemd-logind grant the node to any local session,
+# so no per-user group setup is required.
+install_data('udev/70-vinput-uinput.rules',
+  install_dir: 'lib/udev/rules.d')

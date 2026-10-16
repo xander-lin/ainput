@@ -68,6 +68,7 @@ CapsLock release
 | Provider | missing API key or model binary | provider calls `onError` or logs provider-specific failure |
 | OutputHandler | captured input context no longer exists | no focused context found, result dropped and logged |
 | uinput | `/dev/uinput` unavailable | logs failure; voice input can still work but CapsLock restore is unavailable |
+| uinput | `/dev/uinput` not writable | same as above; the shipped `70-vinput-uinput.rules` grants it to local sessions via `uaccess` |
 
 ## Verification
 
