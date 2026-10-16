@@ -34,6 +34,70 @@ timeout, no speech, audio capture, and uncategorized failures (which show
 the provider's raw detail). These messages are status UI, not text inserted
 into the application.
 
+## CapsLock Restore (`/dev/uinput`)
+
+Holding CapsLock to dictate has a side effect: the kernel or compositor has
+already toggled the lock state on the physical key press. When you release the
+key, Vinput injects one synthetic CapsLock press+release through `/dev/uinput`
+to put the lock state back. Vinput therefore needs **write access to
+`/dev/uinput`**.
+
+It does *not* need — and should not get — read access to `/dev/input/event*`.
+These are two different things:
+
+| Node | What it grants | Needed by Vinput |
+|------|----------------|------------------|
+| `/dev/uinput` | create a virtual keyboard and inject key events | **yes** |
+| `/dev/input/event*` | read every real keystroke on the machine | no |
+
+`/dev/uinput` is a *static* node: `systemd-tmpfiles` creates it before
+`systemd-udevd` starts and leaves it at `0600 root:root` unless a rule chgrps
+it, so the fix has to be a persistent udev rule. The package ships one:
+
+```udev
+# /usr/lib/udev/rules.d/70-vinput-uinput.rules
+KERNEL=="uinput", SUBSYSTEM=="misc", OPTIONS+="static_node=uinput", TAG+="uaccess"
+```
+
+`TAG+="uaccess"` hands the decision to `systemd-logind`: whichever user holds
+the active session on a local seat gets a per-uid ACL on the node. That covers
+every local account automatically — including users created *after* the
+package was installed — with no group membership, no re-login, and without
+granting access to the keyboard event devices. `OPTIONS+="static_node=uinput"`
+is mandatory here because udev ignores static nodes without it.
+
+### Verify
+
+```bash
+getfacl /dev/uinput
+```
+
+A working setup lists a `user:<you>:rw-` entry. If that line is missing,
+CapsLock stays locked on after every dictation while the rest of voice input
+keeps working; the fcitx5 log then contains
+`Vinput: cannot open /dev/uinput (errno=13); CapsLock restore disabled`.
+
+### Apply after a manual install
+
+The `pacman` install/upgrade path does this for you:
+
+```bash
+modprobe uinput
+sudo udevadm control --reload
+sudo udevadm trigger --subsystem-match=misc --sysname-match=uinput
+fcitx5 -r
+```
+
+### Why not group membership?
+
+A common older pattern is `GROUP="input", MODE="0660"` plus adding the user to
+the `input` group — or simply depending on another package (for example
+`ydotool`'s rule) that configures `/dev/uinput` for you. It works, but (a) the
+`input` group also carries read access to every `/dev/input/event*`, i.e. the
+ability to log all keystrokes, and (b) group membership is per-user data, so
+it cannot cover accounts created later without extra machinery. `uaccess` has
+neither problem, and it targets only `/dev/uinput`.
+
 ## ASR Backends
 
 | Provider | Type | Requires |
@@ -58,19 +122,10 @@ ninja -C build
 sudo meson install -C build
 ```
 
-The package installs `/usr/lib/udev/rules.d/70-vinput-uinput.rules`. Vinput
-needs write access to `/dev/uinput` to inject a synthetic CapsLock
-press+release after push-to-talk; without it the physical key leaves CapsLock
-locked on. The rule uses systemd-logind's `uaccess` tag, so any user with an
-active local session gets access automatically — no group membership, no
-per-user setup, and newly created accounts work too. After a manual
-`meson install`, run `udevadm control --reload` and
-`udevadm trigger --subsystem-match=misc --sysname-match=uinput` once, then
-restart fcitx5 (`fcitx5 -r`).
-
-Verify with `getfacl /dev/uinput`: a working setup shows a `user:<you>:rw-`
-entry. If it is missing, CapsLock restore is disabled and the fcitx5 log
-contains `cannot open /dev/uinput`.
+The package also installs `/usr/lib/udev/rules.d/70-vinput-uinput.rules`,
+which is what lets Vinput put the CapsLock state back after dictation — see
+[CapsLock Restore](#capslock-restore-devuinput) for what it does, how to
+verify it, and what to do when it is missing.
 
 ### 2. Configure (cloud ASR)
 
