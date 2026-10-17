@@ -513,17 +513,36 @@
   timings and takes the largest gap, which is always that startup delay, on any
   machine. Hence a device-independent constant masquerading as a device
   property, and a 2 s buffer recommended for every device.
+  **The 2 s itself is neither hardware nor startup delay.** It is
+  PipeWire's default recording fragment:
+  `pipewire-pulse.conf`: `pulse.default.frag = 96000/48000 # 2 seconds`,
+  which at 16 kHz mono is exactly 64000 bytes — the number the old detector
+  "measured". `pa_simple_new(attr=NULL)` asks for the default, so the very
+  first `pa_simple_read` cannot return until one default-sized fragment has
+  been filled, and the detector timed that wait. Confirmed by varying the
+  request: fragsize default → first read 2015 ms; 3200 B (100 ms) → 100 ms;
+  640 B (20 ms) → 33 ms. First-read latency tracks the *requested fragment*,
+  not the device. Device wake from `SUSPENDED` costs 43–70 ms measured with
+  the async API, so cold start was never the issue.
+
   Two bugs compounded: blocking `pa_simple_read` made the buffer size
-  semantically important, and the measurement attributed a startup cost to
-  hardware periodicity. A 2 s blocking read also *masked* the tail loss
+  semantically important, and the measurement attributed a buffering constant
+  to hardware periodicity. A 2 s blocking read also *masked* the tail loss
   (the read finishes roughly when audio starts flowing), which is why the
-  change looked like a fix.
+  change looked like a fix. The proper fix was to stop blocking: specifying
+  the fragment explicitly and peeking removes both the 2 s latency and the
+  tail loss.
 - **Prevention**:
   - A one-off startup cost must never enter a "periodic behaviour" measurement.
     Check whether a detected pattern repeats within the observation window
     before calling it periodic (here: 1 occurrence in 6 s ≠ a 2 s period).
   - When a heuristic reproduces the same constant on unrelated hardware, the
-    constant describes the measuring code, not the hardware.
+    constant describes the measuring code, not the hardware. Trace a suspicious
+    value back to its configuration source (`pulse.default.frag` here) before
+    building any model on top of it.
+  - Blocking convenience APIs (`pa_simple_read`) hide the cost they impose: the
+    delay showed up as "the device is slow" instead of "we asked for a 2 s
+    fragment". Prefer the API whose parameters are explicit, then set them.
   - Before exposing a knob, measure whether the underlying quantity is
     controllable at all. "It felt tunable" is not evidence; here the parameter
     turned out to be an echo of our own request.
