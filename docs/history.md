@@ -12,6 +12,19 @@ For current behavior read `README.md`, `docs/configuration.md`, and
 
 Do not implement against this file without checking the source first.
 
+**Update 2026-10 (0.2 rewrite).** Part 1's findings were addressed by the
+Rust rewrite; the analysis is kept verbatim below as the record of what was
+wrong and why.
+
+| Finding | Outcome in 0.2 |
+|---------|----------------|
+| 1. `activeRecognition_` deadlock | Gone. One recognition worker; the pending counter is reserved up front and released on every path, including cancellation. A cancelled request returns `Timeout("cancelled")` instead of returning silently. |
+| 2. Results dropped on UUID mismatch | Gone. The commit falls back to the currently focused input context and logs it. |
+| 3. Key state stuck | Mitigated. A recording older than 120 s is force-stopped, and a debounce counter idle for 10 s is cleared. |
+| 4. `ProcessingTurn` lock | Gone. Each recording has its own thread and buffer; there is no global ticket. |
+| 5. Crest/VAD gate | Unchanged behaviour, now adjustable in fcitx5-configtool. |
+| 7. Suggested fixes | Not applied as written; superseded by the rewrite. |
+
 ---
 
 ## Part 1 — 2026-09 failure analysis

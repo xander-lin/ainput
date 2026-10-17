@@ -7,26 +7,26 @@ _pkgname=fcitx5-ainput
 # pkgver()). Keep it at the current real version so the AUR listing is not
 # stale; the authoritative version is computed from git history by pkgver()
 # below at build time. Bump this + regenerate .SRCINFO before pushing to AUR.
-pkgver=0.1.0.r169.08bc5f1
+pkgver=0.2.0.r1.g0000000
 pkgrel=1
 pkgdesc="Voice input addon for fcitx5: push-to-talk ASR via CapsLock"
 arch=('x86_64')
 url="https://github.com/xander-lin/ainput"
 license=('MIT')
 depends=('fcitx5' 'libebur128' 'libpulse' 'curl' 'speexdsp' 'libsoxr')
-makedepends=('git' 'meson' 'ninja')
+makedepends=('git' 'meson' 'ninja' 'cargo')
 install=PKGBUILD.install
 source=("$_pkgname::git+https://gitee.com/xander-lin/ainput.git")
 sha256sums=('SKIP')
 
 pkgver() {
     cd "$_pkgname"
-    printf "0.1.0.r%s.%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+    printf "0.2.0.r%s.%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
 }
 
 build() {
     cd "$_pkgname"
-    meson setup build --prefix=/usr --buildtype=plain -Dcpp_args='-O2 -march=native'
+    meson setup build --prefix=/usr --buildtype=release
     meson compile -C build
 }
 
@@ -36,9 +36,4 @@ package() {
     install -Dm644 README.md "$pkgdir/usr/share/doc/$_pkgname/README.md"
     install -Dm644 README.zh-CN.md "$pkgdir/usr/share/doc/$_pkgname/README.zh-CN.md"
     install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$_pkgname/LICENSE"
-    # No /etc layer: defaults live in code, user files are optional and sparse.
-    # Shipped examples carry comments and document every field.
-    for f in config/*.example; do
-        install -Dm644 "$f" "$pkgdir/usr/share/doc/$_pkgname/$f"
-    done
 }

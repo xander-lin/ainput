@@ -1,5 +1,5 @@
 .\" Man page for fcitx5-ainput
-.TH ainput 1 "2026-10-17" "0.1.0" "fcitx5-ainput"
+.TH ainput 1 "2026-10-17" "0.2.0" "fcitx5-ainput"
 .SH NAME
 fcitx5\-ainput \- voice input addon for fcitx5
 .SH SYNOPSIS
@@ -43,40 +43,54 @@ file. While holding CapsLock:
 .br
 \fB\(da / j\fP   \-\- next denoiser
 .SH CONFIGURATION
-Configuration files are stored in \fB~/.config/ainput/\fP.
-Defaults are built into the code: files are optional and sparse.
-Every file supports // line comments.
-\fBconfig.json\fP, \fBqwen.json\fP and \fBdoubao.json\fP self-heal:
-whenever a read finds them missing, a commented template is regenerated
-(mode 0600) -- rename one away to get a fresh template. Seeded credentials
-carry a PASTE_YOUR_KEY_HERE placeholder that counts as not configured.
-Cloud provider configs (qwen.json, doubao.json) are re-read before each
-recognition, so model and parameter changes apply on the next recording
-without restarting fcitx5. Local provider configs (zipformer.json,
-fire_red.json) are read when the provider is created; switch provider away
-and back, or restart fcitx5, after editing them.
+Configuration is split in two.
+
+Shared settings (backend selection, CapsLock hold time, notification
+timeout, denoiser, loudness target, suppression level and speech gate) are
+stored in fcitx5's own configuration,
+\fB~/.config/fcitx5/conf/ainput.conf\fP, and are editable in
+\fBfcitx5-configtool\fP under Addons -> Ainput.
+
+Per-provider data (API keys, model identifiers, endpoints, local model and
+binary paths, timeouts) is stored in \fB~/.config/ainput/*.json\fP.
+Each file is created on first run with every field present, its default
+value and comments; files are optional and support // line comments.
+Provider files are re-read before every recognition, so edits apply to the
+next recording without restarting fcitx5.
 Every file is validated on read: JSON syntax errors (with byte offset) are
 logged and the file's values are not trusted; unknown fields get a "did you
 mean" suggestion and type mismatches are named in the fcitx5 log, with the
 first provider-file issue repeated as a warning line in the switch
 notification.
-.SS Global
+.SS Shared (fcitx5-configtool)
+The following options are stored by fcitx5 itself; the file only lists values
+that differ from their default.
 .TP
-\fBconfig.json\fP
-Active provider selection and shared tuning. \fBCtrl+CapsLock\fP switching
-rewrites the \fBprovider\fP line, so it always shows the backend the next
-login starts with.
-.RS
-.nf
-{
-    // qwen | doubao | zipformer | fire_red | mock
-    "provider": "qwen",
-    "ui":    { "activation_msec": 300 },
-    // denoise is off by default; add "denoise": "speexdsp" to enable it
-    "audio": { "crest_threshold": 2.4 }
-}
-.fi
-.RE
+\fBProvider\fP (default \fBqwen\fP)
+Active backend: qwen, doubao, zipformer, fire_red or mock.
+\fBCtrl+CapsLock\fP switching rewrites it.
+.TP
+\fBActivationMsec\fP (default \fB300\fP)
+How long CapsLock must be held before recording starts.
+.TP
+\fBNotificationTimeout\fP (default \fB2000\fP)
+How long switch notifications stay visible, in milliseconds.
+.TP
+\fBDebounceCount\fP (default \fB2\fP)
+Synthetic CapsLock events swallowed after the restore tap.
+.TP
+\fBDenoise\fP (default \fBnone\fP)
+none, speexdsp or deepfilter. deepfilter needs a helper binary at
+~/.local/share/ainput/bin/deep-filter.
+.TP
+\fBLufsTarget\fP (default \fB-16\fP)
+Loudness normalization target in LUFS.
+.TP
+\fBSpeexLevel\fP (default \fB-15\fP)
+speexdsp suppression strength in dB.
+.TP
+\fBCrestThreshold\fP (default \fB2.4\fP)
+Speech gate; lower is more permissive, 0 disables it.
 .SS User-facing (must edit)
 .TP
 \fBdoubao.json\fP
@@ -149,8 +163,11 @@ to be reused while preserving result order. Zipformer and FireRed intentionally
 run one local process per utterance.
 .SH FILES
 .TP
+.I ~/.config/fcitx5/conf/ainput.conf
+Shared settings, written by fcitx5.
+.TP
 .I ~/.config/ainput/
-Configuration directory.
+Per-provider configuration directory.
 .TP
 .I ~/.cache/ainput/pa_buffer.json
 Auto-detected PulseAudio buffer sizes, keyed by source id (state, not

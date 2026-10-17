@@ -1,8 +1,0 @@
-{
-    "api_key": "PASTE_YOUR_KEY_HERE",
-    "resource_id": "volc.seedasr.auc",
-    "model_name": "bigmodel",
-    "enable_itn": true,
-    "enable_punc": true,
-    "timeout_sec": 90
-}

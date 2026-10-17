@@ -373,3 +373,67 @@
     then remove both.
   - "Already tracked so it works" is not a verification — gitignore only
     affects untracked paths, so the failure appears on the next new file.
+## 14. Porting the core to Rust: what the rewrite had to fix first
+  (found 2026-10)
+
+- **Mistake/context**: The C++ core left several failures unobservable (a
+  missing denoiser helper degraded silently, config was read once per process,
+  a cancelled provider request returned without completing the queue entry).
+  A Rust port was proposed. Before committing, the fcitx5 load path was
+  verified with a throwaway addon: `dlopen` → `dlsym("fcitx_addon_factory_instance")`
+  returns a `fcitx::AddonFactory *`, so a C++ shell can call a Rust
+  `staticlib` through a plain C ABI. Only one C symbol is needed; no fcitx5
+  type has to cross the boundary.
+- **Root cause**: The load protocol is C++-shaped (vtable + `std::string`), so
+  a "pure Rust addon" means reimplementing the Itanium C++ ABI by hand — which
+  breaks silently on fcitx5 changes. Anything *below* that boundary is plain C
+  and POSIX, where Rust is a better fit.
+- **Correction**: Split the addon: `shell/` (C++, `AddonInstance`,
+  `AinputConfig`, key events, `OutputHandler`) and `rust/` (capture, DSP, ASR,
+  config, uinput, diagnostics), joined by `shell/ainput_core.h`. While porting,
+  each silent failure was converted into a categorised `Error`.
+- **Prevention**:
+  - Verify a foreign-language addon by actually loading it into fcitx5 and
+    checking `Loaded addon <name>` in the log; a successful link proves nothing.
+  - Keep the FFI surface to integers, C strings and POD structs. A `std::string`
+    or a class with a destructor in the signature is a red flag.
+  - When rewriting, port each known bug to a test or an explicit rule; a
+    straight translation would have reproduced them.
+
+## 15. Three concrete traps hit while porting (found 2026-10)
+
+- **`UI_SET_LEDBIT` is `_IOW('U', 105, int)`, not 103.** 103 is `UI_SET_ABSBIT`,
+  so the ioctl returned EINVAL and the whole `initUinput()` sequence failed with
+  a message that named the wrong cause. Deriving the numbers from `_IOW(base,
+  nr, size)` in code (`const fn iow`) prevents the next transcription error.
+- **`UI_DEV_SETUP` is mandatory.** Skipping it makes `UI_DEV_CREATE` fail; the
+  kernel wants `struct uinput_setup` (name + `input_id` with
+  `bustype = BUS_VIRTUAL`) first. Also: `UI_SET_EVBIT` rejects `EV_SYN`, so
+  enabling it there fails with EINVAL even though `EV_SYN` is sent later.
+- **fcitx5's `Configuration` has no `double`.** `Option<double>` fails to
+  compile: there is no `marshallOption` overload and no
+  `configTypeNameHelper(double*)`. A custom `Marshaller` plus an explicit
+  `OptionTypeName<double>` specialization works; note that
+  `FCITX_SPECIALIZE_TYPENAME(double, ...)` does **not**, because the helper is
+  a function overload and two-phase lookup cannot find it for a fundamental
+  type.
+
+## 16. Generated config must migrate exactly once (found 2026-10)
+
+- **Mistake/context**: The 0.2 migration reads the 0.1 `config.json`, copies its
+  values into fcitx5's configuration, and left the original in place. On the
+  next start it would run again and overwrite anything the user had since
+  changed in `fcitx5-configtool`.
+- **Root cause**: "Do not delete the user's file" was implemented as "leave it
+  where the migration looks for it", so the migration had no way to know it had
+  already run.
+- **Correction**: After a successful save the file is renamed to
+  `config.json.migrated` (with a numeric suffix if that exists). Nothing is
+  deleted, and the migration is idempotent.
+- **Prevention**:
+  - Any one-shot migration needs a durable "already done" marker, and the
+    marker must be written **after** the new data is safely stored.
+  - Renaming preserves the old file for the user while removing it from the
+    discovery path; prefer that over deleting or over a marker file elsewhere.
+  - Editing `~/.config/fcitx5/conf/*.conf` while fcitx5 runs is pointless: it
+    rewrites the file on exit. Stop fcitx5 first, then edit, then start.

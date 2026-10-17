@@ -1,182 +1,152 @@
 # Architecture
 
-Module boundaries, data flow, the provider contract, and how to add a backend.
-
-## Module map
+The addon is split along the one boundary that actually costs something: fcitx5
+speaks C++ with vtables and `std::string`, everything else is ordinary POSIX
+and C libraries.
 
 ```text
-fcitx5
-  |
-  v
-adapter/AinputAddon
-  |-- CapsLock / Ctrl+CapsLock key lifecycle
-  |-- provider and denoiser selection, notifications
-  |-- AudioCapture lifecycle and recognition queue
-  |-- IAsrProvider lifecycle
-  `-- OutputHandler lifecycle
-
-ASR_provider/AudioCapture
-  |-- PulseAudio capture
-  |-- hardware buffer detection (cached per source)
-  |-- ebur128 normalization
-  |-- speech gate (crest factor + speexdsp VAD)
-  |-- denoise (only when configured)
-  |-- silence trim
-  `-- samples + wavPath
-
-ASR_provider/IAsrProvider
-  |-- transcribe(samples, wavPath)
-  `-- onResult(text, isFinal) / onError(error, category)
-
-adapter/OutputHandler
-  |-- self-pipe thread handoff
-  `-- fcitx InputContext::commitString(text)
+┌──────────────────────────────────────────────────────────────┐
+│ shell/  (C++, ~600 lines)                                     │
+│   AddonInstance + AddonFactory          fcitx5 owns these     │
+│   AinputConfig                          appears in configtool │
+│   CapsLock event state machine          KeyEvent              │
+│   OutputHandler                         self-pipe → commitString │
+│   notifications                         INotifications        │
+└──────────────────────────┬───────────────────────────────────┘
+                           │ extern "C" — integers, C strings, POD only
+┌──────────────────────────┴───────────────────────────────────┐
+│ rust/  (Rust, ~3400 lines)                                    │
+│   capture        PulseAudio, per-recording thread             │
+│   dsp            ebur128, speexdsp, soxr, WAV                 │
+│   asr            qwen, doubao, zipformer, fire_red, mock      │
+│   engine         queue + single recognition worker            │
+│   config         provider JSON, schema, templates, migration   │
+│   uinput         virtual keyboard for CapsLock restore         │
+│   diagnostic     bounded JSON-lines log                       │
+└──────────────────────────────────────────────────────────────┘
 ```
 
-| Directory | Owns | Must not own |
-|-----------|------|--------------|
-| `adapter/` | fcitx5 integration, key handling, activation, notifications, CapsLock restore, text commit | ASR protocols, denoise algorithms, model command lines |
-| `ASR_provider/` | audio capture + preprocessing, provider abstraction, provider registry, vendor protocols | fcitx5 input contexts, focus state, `commitString` |
-| `tools/` | manual hardware diagnostics | anything the addon links |
-| `tests/` | automated contracts that need no hardware | microphone / cloud / model dependencies |
+`shell/ainput_core.h` is the whole contract. No fcitx5 type crosses it: the
+shell passes `const char *`, integers and two POD structs, and receives text or
+a categorised error through three function pointers.
 
-`OutputHandler` is the only bridge from worker threads back into the fcitx
-event loop: it writes to a self-pipe, the main loop drains it, and the commit
-happens against the input-context UUID captured when recording started.
+## Why this split
+
+A Rust-only addon is possible (the loader only needs one `extern "C"` symbol
+returning a `fcitx::AddonFactory *`), but implementing `AddonInstance` from Rust
+means reproducing vtable layout and the `std::string` ABI, which breaks
+silently when fcitx5 changes. A C++-only addon means hand-rolling JSON parsing,
+HTTP and audio DSP.
+
+So: the ~600 lines that must speak C++ stay in C++, and everything with real
+logic is Rust, where a failed operation is a `Result` rather than an ignored
+return code.
 
 ## Data flow
 
 ```text
 CapsLock press
-  -> activation timer starts (activation_msec, default 300)
-  -> on activation: AudioCapture created, OutputHandler captures the current
-     input-context UUID, panel shows "listening..."
-  -> AudioCapture records and preprocesses
+  -> activation timer (ActivationMsec)
+  -> on fire: engine.start() reserves a queue slot, spawns a capture thread,
+     the shell records the current input-context UUID, panel shows "listening..."
+  -> capture thread: PulseAudio → normalize → speech gate → denoise → trim → WAV
 
 CapsLock release
-  -> panel shows "processing audio..."
-  -> AudioCapture::stop() signals the capture loop and returns immediately
-  -> CapsLock state restored through uinput
-  -> capture thread finishes preprocessing, writes the WAV
-  -> recorded callback shows "recognizing..." and enqueues a request
-  -> one recognition runs at a time (max 3 including the active one)
-  -> provider created or reused; transcribe() runs on its worker
-  -> onResult/onError
-  -> OutputHandler::submit() -> commitString() in the fcitx loop
+  -> panel shows "processing audio...", engine.stop() signals the thread,
+     CapsLock restored through uinput
+  -> capture thread finishes preprocessing and enqueues the WAV
+  -> one recognition worker picks it up in FIFO order
+  -> provider runs (cloud: HTTP; local: one child process)
+  -> on_text / on_error → OutputHandler → commitString in the fcitx loop
 ```
 
-`Ctrl+CapsLock` enters switch mode without recording. `←/→` or `h/l` change
-the ASR provider, `↑/↓` or `k/j` change the denoiser. Both selections are
-written back to `config.json` and apply to the next recording.
+`Ctrl+CapsLock` enters switch mode without recording. `←/→` or `h/l` change the
+backend, `↑/↓` or `k/j` change the denoiser. Both are written to
+`~/.config/fcitx5/conf/ainput.conf` and apply to the next recording.
+
+## Concurrency model
+
+| Thread | Count | Work |
+|--------|-------|------|
+| fcitx5 main | 1 | key events, config, `commitString` |
+| capture | one per recording | PulseAudio read loop, DSP, WAV write |
+| recognition | one for the process | pulls from the queue, calls the provider |
+
+At most three recordings are in flight, counting the one being recognized. The
+counter is reserved **before** anything is created and released exactly once on
+every path — success, provider error, capture error, or worker shutdown — so a
+full queue can never become permanent.
+
+Two watchdogs cover dropped key events: a recording older than 120 s is stopped,
+and a debounce counter that saw no CapsLock traffic for 10 s is cleared.
 
 ## Provider contract
 
-Defined in `ASR_provider/src/asr_provider.h`; that file is authoritative over
-any snippet here.
+`rust/src/asr/mod.rs`:
 
-```cpp
-using AsrResultCallback = std::function<void(const std::string &text, bool isFinal)>;
-using AsrErrorCallback =
-    std::function<void(const std::string &error, AsrErrorCategory category)>;
+```rust
+pub trait Provider: Send {
+    fn transcribe(&self, input: &Input<'_>) -> Result<String>;
+}
 
-class IAsrProvider {
-public:
-    virtual ~IAsrProvider() = default;
-    virtual void transcribe(std::vector<int16_t> samples,
-                            const std::string &wavPath) = 0;
-    virtual void setConfig(const std::string &key, const std::string &value);
-    virtual void setDiagnosticId(uint64_t id);
-    void setResultCallback(AsrResultCallback cb);
-    void setErrorCallback(AsrErrorCallback cb);
-};
-
-class IAsrProviderFactory {
-public:
-    virtual ~IAsrProviderFactory() = default;
-    virtual std::string id() const = 0;
-    virtual std::string name() const = 0;
-    virtual std::string displayName() const { return name(); }
-    virtual std::unique_ptr<IAsrProvider> create() = 0;
-};
+pub struct Input<'a> {
+    pub wav_path: &'a Path,
+    pub cancel: &'a Arc<AtomicBool>,
+}
 ```
 
-- Providers receive already captured audio. They never open the microphone,
-  read keyboard events, or touch fcitx5 types.
-- Callbacks fire on the provider's worker thread. UI work must be handed to
-  the host event loop (the adapter does this through `OutputHandler`).
-- `displayName()` is what the `Ctrl+CapsLock` notification shows. Factories
-  whose model comes from a config file override it to include the current
-  model and the first schema warning.
-- `AsrErrorCategory` (ConfigMissing, ConfigInvalid, AuthRejected,
-  ModelNotFound, LocalSetup, InvalidRequest, Network, ServiceUnavailable,
-  Timeout, NoSpeech, EmptyResult, AudioData, Runtime, Unknown) lets the
-  adapter print an actionable status. The raw detail is shown only for the
-  unclassified bucket (ConfigInvalid, InvalidRequest, Runtime, Unknown).
+- Providers receive a finished WAV path; they never open the microphone or
+  touch fcitx5 types.
+- `cancel` is checked cooperatively. A cancelled request must return an error,
+  never silently produce nothing — the queue depends on exactly one outcome per
+  recording.
+- Errors carry a `Category` (`ConfigMissing`, `AuthRejected`, `ModelNotFound`,
+  `LocalSetup`, `Network`, `ServiceUnavailable`, `Timeout`, `NoSpeech`,
+  `EmptyResult`, `AudioData`, `Runtime`, `ConfigInvalid`, `InvalidRequest`,
+  `Unknown`) which the shell turns into one actionable sentence.
 
-### Registry
+### Backends
 
-Factories self-register in a static initializer. `src/meson.build` builds the
-module as a static library and exposes `asr_provider_dep` with `link_whole`,
-so registration objects survive linking into the addon, tools, and tests.
+| ID | Transport | Needs |
+|----|-----------|-------|
+| `qwen` | HTTPS, base64 data URL, synchronous | API key |
+| `doubao` | HTTPS, inline base64, submit + poll | API key, resource id |
+| `zipformer` | child process, streaming transducer | `sherpa-onnx` + model |
+| `fire_red` | child process, offline AED | `sherpa-onnx-offline` + model |
+| `mock` | none | nothing |
 
-```cpp
-auto &reg = ainput::AsrProviderRegistry::instance();
-auto list = reg.listFactories();          // (id, displayName) pairs
-auto asr = reg.create("mock");
-```
+Cloud requests are cancelled through libcurl's progress callback; local engines
+by killing the child. Both are bounded by the provider's `timeout_sec`.
 
-### Implementations
+### Adding a backend
 
-| ID | Name | Input | External dependency |
-|----|------|-------|---------------------|
-| `mock` | Mock (test) | ignored | none; returns `hello world` |
-| `qwen` | Qwen ASR (Alibaba DashScope) | WAV path, base64 data URL | API key in `qwen.json` |
-| `doubao` | Doubao AUC (ByteDance) | WAV path, base64 inline | API key + resource ID in `doubao.json` |
-| `zipformer` | Local Zipformer (streaming) | WAV path | `sherpa-onnx` binary + model files |
-| `fire_red` | Local FireRed (offline AED) | WAV path | `sherpa-onnx-offline` binary + model files |
+1. `rust/src/asr/<id>.rs` implementing `Provider`.
+2. Add it to `DESCRIPTORS` and `create()` in `rust/src/asr/mod.rs`.
+3. If it reads a config file: a schema in `rust/src/config.rs` and a full
+   template in `rust/src/templates.rs` (`templates_list_every_field` enforces
+   that every field is visible).
+4. Document the required external pieces in `docs/development.md`.
 
-Cloud providers own one serialized worker thread each; local providers spawn
-one process per utterance and join it on cancellation.
+## Failure handling
 
-### Adding a provider
+The rewrite exists partly because the C++ version swallowed failures. The rule
+is now: a failure either propagates as an `Error` with a category, or it is
+reported to the user. There is no third option.
 
-1. Add `src/<id>_provider.{h,cpp}` under `ASR_provider/src/`.
-2. Implement `transcribe()` and a factory with stable `id()`, `name()`,
-   `create()`; override `displayName()` if the model is config-driven.
-3. Register the factory in the `.cpp` with a static initializer.
-4. Add the files to `src/meson.build`.
-5. Add a test under `tests/` if the behavior can run without network, keys,
-   models, or a microphone. Otherwise document manual verification.
-6. Add the `id` to the `provider` enum in `config/config.json.example`,
-   `docs/development.md`, and the schema if it takes a config file.
-
-## Failure boundaries
-
-| Area | Failure | Handling |
-|------|---------|----------|
-| AudioCapture | PulseAudio open/read failure | status message, no provider call if no samples |
-| AudioCapture | no speech after gating | `Ainput: no speech detected`, WAV removed |
-| AudioCapture | `deep-filter` missing | denoise falls back to the undenoised audio (stderr note only) |
-| Provider | missing key / model / binary | `onError` with a category -> actionable panel text |
-| OutputHandler | captured context is gone | logged and dropped; no fallback to the newest context |
-| uinput | `/dev/uinput` not writable | CapsLock restore disabled; voice input still works |
-| uinput | compositor ignores synthetic events | CapsLock restore ineffective on some compositors |
-
-Failures are surfaced through callbacks, status text, or the diagnostic log.
-Provider code never reaches into adapter state.
-
-## Why this shape
-
-Recording and recognition meet at one stable boundary: `std::vector<int16_t>`
-plus a WAV path. Local providers can hand the path to a CLI, cloud providers
-can encode the same bytes, and the adapter never learns the protocol. The
-registry keeps discovery out of the adapter, and `link_whole` makes static
-registration deterministic. Replacing a provider means preserving
-`transcribe()` + factory metadata; replacing capture means preserving
-`RecordedCallback(samples, wavPath)`.
+| Failure | Behaviour |
+|---------|-----------|
+| Missing API key / model file | panel shows the exact file to edit |
+| Denoise helper missing | recording is **discarded** with a setup error, not sent undenoised |
+| Microphone unavailable | `Ainput: microphone ...` immediately, not an empty result |
+| Input context gone before commit | result goes to the currently focused context, logged |
+| `/dev/uinput` unavailable | one warning naming the udev rule; voice input still works |
+| Queue full | `recognition queue full; try again`, newest recording discarded |
+| Provider cancelled | returns `Timeout("cancelled")` so the queue advances |
 
 ## Verification
 
-Automated coverage lives in `tests/` (see `docs/development.md`). Manual
-checks that need real hardware: `tools/test_audio_file`,
-`tools/test_audio_pipeline`, `tools/test_uinput_caps`.
+- `meson test -C build` runs the Rust unit tests (no hardware needed).
+- `cargo test --lib -- --ignored` runs the end-to-end test that records from the
+  real microphone and checks the callback fires.
+- `tools/` is gone: diagnostics are a `--features diagnostics` build writing
+  `~/.local/share/ainput/diagnostic.log`.

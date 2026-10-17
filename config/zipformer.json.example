@@ -1,5 +1,0 @@
-{
-    "model_dir": "~/.local/share/ainput/models/zipformer-zh-en",
-    "timeout_sec": 120,
-    "bin_path": "~/.local/share/ainput/sherpa-onnx/bin/sherpa-onnx"
-}

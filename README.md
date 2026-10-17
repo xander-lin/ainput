@@ -4,7 +4,9 @@
 
 Push-to-talk voice input for [fcitx5](https://github.com/fcitx/fcitx5): hold
 **CapsLock**, speak, release — the recognized text is inserted at the cursor.
-Ainput (**a**udio **input**) is a small fcitx5 addon for Linux desktops.
+Ainput (**a**udio **input**) is a small fcitx5 addon for Linux desktops. The
+fcitx5-facing layer is C++; capture, audio processing and the ASR backends are
+Rust.
 
 ## Features
 
@@ -28,6 +30,7 @@ Ainput (**a**udio **input**) is a small fcitx5 addon for Linux desktops.
 
 - Linux with fcitx5 (`fcitx5`, `libpulse`, `libebur128`, `libcurl`,
   `speexdsp`, `libsoxr`)
+- To build from source: a C++20 compiler, Meson, Ninja and a Rust toolchain
 - For local engines: the `sherpa-onnx` binaries and model files (optional,
   roughly 1.3 GB total)
 
@@ -83,12 +86,14 @@ recognition, so a model change applies to the next sentence without a restart.
 
 ## Configure
 
-Configuration lives in `~/.config/ainput/` and is **optional**: defaults are
-compiled in, and `config.json`, `qwen.json`, `doubao.json` recreate themselves
-as commented templates when missing (mode `0600`). All files accept `//`
-comments.
+**Shared settings** (backend, hold time, denoiser, audio tuning) live in
+fcitx5's own configuration and appear in **fcitx5-configtool** under
+*Addons → Ainput*. Nothing to edit by hand unless you prefer to.
 
-Minimum for a cloud provider — put the key in the file and dictate:
+**Per-provider data** (credentials, model id, paths) lives in
+`~/.config/ainput/*.json`. Every file is created on first run with all fields
+present, their defaults, and comments, so opening one shows everything that can
+be set. Minimum for a cloud provider:
 
 ```json
 // ~/.config/ainput/qwen.json
@@ -103,8 +108,8 @@ Minimum for a cloud provider — put the key in the file and dictate:
 Protect the credential files: `chmod 600 ~/.config/ainput/{qwen,doubao}.json`.
 Keys are plaintext; there is no secret-store integration by design.
 
-Full key reference, defaults, validation rules, and the migration notes for
-older config layouts: [`docs/configuration.md`](docs/configuration.md).
+Full reference, defaults, validation rules and the 0.1 → 0.2 migration:
+[`docs/configuration.md`](docs/configuration.md).
 
 ## Local models (optional)
 
@@ -169,13 +174,17 @@ its own message (`fill api_key in ...`, `API key rejected`, `network error`,
 **Recognition queue full.** At most three recordings are accepted at once.
 Wait for `recognizing...` to finish.
 
+**Settings don't appear in fcitx5-configtool.** The addon must have loaded at
+least once (restart fcitx5), and `fcitx5-configtool` must be from the same
+fcitx5 version. Settings are stored in `~/.config/fcitx5/conf/ainput.conf`.
+
 ## Documentation
 
 - [`docs/configuration.md`](docs/configuration.md) — every config key and default
 - [`docs/architecture.md`](docs/architecture.md) — modules, provider contract,
   how to add a backend
-- [`docs/development.md`](docs/development.md) — build, tests, tools,
-  diagnostics, repository conventions
+- [`docs/development.md`](docs/development.md) — build, tests, diagnostics,
+  repository conventions
 - [`docs/history.md`](docs/history.md) — dated failure analysis and the
   engineering log (archive; not a specification)
 - [`docs/qwen-asr-api.md`](docs/qwen-asr-api.md),

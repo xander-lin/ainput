@@ -29,31 +29,21 @@ who want fast push-to-talk dictation without leaving the keyboard.
   (`Ainput Qwen [timer] encode/network/parse` logs, `diagnostic_log` events).
 - Every provider must degrade loudly and recoverably: cancellable requests,
   curl handle eviction on transport failure, actionable error strings.
-- Configuration layout (2026-10 restructure, user-selected): one global
-  `config.json` (`provider` selection + `[ui]` + `[audio]` sections, `//`
-  comments allowed, switch write-backs land here) plus one file per provider
-  (`qwen.json`, `doubao.json`, `zipformer.json`, `fire_red.json`) for
-  credential isolation. Defaults live in code only — files are optional and
-  sparse, there is no `/etc/vinput` layer (removed 2026-10: no pacnew noise,
-  no test-isolation footgun). `advanced.json`, `vinput.json` and
-  `audio.json` are historical names that no longer exist.
-- API keys are plaintext JSON fields (secret-store integration was added
-  and then removed in 2026-10 by explicit decision: no Secret Service on
-  the target desktop; simplicity wins). Recommend `chmod 600` on the
-  credential files.
-- Every config file is schema-validated on read (`src/config_schema.h`):
-  syntax errors carry a byte offset and disable the file (input-panel
-  error), unknown fields get "did you mean" suggestions, type mismatches
-  and missing required fields are logged and appended to the switch
-  notification. Retired fields are flagged as unknown so stale files tell
-  the user they do nothing. Schemas live next to the module; update them
-  together with the readers.
-- Config discovery is self-healing, not doc-first: config.json/qwen.json/
-  doubao.json regenerate as commented templates whenever a read finds them
-  missing (users rename a file away to recover the template); the seeded
-  api_key placeholder counts as "not configured" so errors point at the
-  exact file. `src/config_templates.h` holds the texts — they must stay
-  valid JSON after comment stripping and pass their schemas.
+- Configuration split (2026-10, 0.2):
+  - Shared settings (provider, key timing, denoise, audio tuning) live in
+    fcitx5's own `Configuration`, so they appear in `fcitx5-configtool` and land
+    in `~/.config/fcitx5/conf/ainput.conf`. fcitx5 writes only non-defaults.
+  - Per-provider data (credentials, model ids, endpoints, paths, timeouts) is
+    `~/.config/ainput/<provider>.json`. Every file is seeded on first run with
+    **all** fields, their defaults and English comments; a template that omits a
+    field fails `templates_list_every_field`.
+  - There is no `config.json` anymore. The 0.1 file is migrated once into
+    `ainput.conf` and renamed to `config.json.migrated` so migration cannot run
+    twice and overwrite later UI changes.
+  - No `/etc` layer, and no pacnew dance: package upgrades never touch user
+    files.
+- Generated config templates are English only. `README.zh-CN.md` is the only
+  Chinese artefact in the repository.
 - Tuning knobs stay out of config unless a user has a real reason to turn
   them: request_style, the doubao poll knobs and num_threads were retired
   into code constants in 2026-10 (doubao keeps one whole-budget
@@ -71,13 +61,26 @@ who want fast push-to-talk dictation without leaving the keyboard.
 
 ## Project Principles
 
-- Modular, pluggable providers: a new ASR backend = new `{id}_provider.{h,cpp}`
-  in `ASR_provider/src/` + factory self-registration + one line in
-  `adapter/src/ainput.cpp` to link. Keep mock provider as the interface spec.
-- Cloud providers own a single serialized worker thread; tasks are queued;
-  cancellation is cooperative via `std::atomic_bool`.
-- JSON parsing in providers is intentionally dependency-free (string find /
-  manual extraction). Keep it minimal but robust to field order.
+- Two halves, one boundary. `shell/` is the C++ part that must be C++ (fcitx5
+  `AddonInstance`, `AinputConfig`, `KeyEvent`, `commitString`). `rust/` owns
+  capture, DSP, ASR, config files, uinput and diagnostics. The only contract is
+  `shell/ainput_core.h`: integers, C strings and POD structs. Never pass a C++
+  type across it.
+- A new ASR backend is `rust/src/asr/<id>.rs` + one entry in `DESCRIPTORS`,
+  `create()` and `docs/architecture.md`. Keep `mock` as the interface spec.
+- One recognition worker for the process; the pending counter is reserved
+  before anything is created and released exactly once on every path.
+  Cancellation is cooperative via `std::sync::atomic::AtomicBool` and must
+  still produce an error, never silence.
+- JSON uses `serde_json`; the old hand-written extraction is gone. Config files
+  keep `//` comments, stripped by `config::strip_comments` in a
+  string-aware, offset-preserving way.
+- Dependencies: use maintained Rust crates where they exist and link the system
+  library (`libpulse-binding`, `curl`); hand-write FFI only for libraries with
+  no maintained crate (`rust/src/ffi/dsp.rs`: ebur128, speexdsp, soxr).
+- Failures are never swallowed. Every failure either becomes an `Error` with a
+  `Category` that the shell renders as one actionable sentence, or is reported
+  to the user. Silently degrading (for example dropping denoising) is a bug.
 - Documentation is one file per topic, not one file per phase of work:
   - `README.md` (English) / `README.zh-CN.md` (Chinese) — project introduction,
     install, usage, provider table, quick config. Keep engineering detail out;
@@ -85,26 +88,29 @@ who want fast push-to-talk dictation without leaving the keyboard.
   - `docs/configuration.md` — every config key, default, validation, migration.
   - `docs/architecture.md` — module boundaries, data flow, provider contract,
     how to add a backend.
-  - `docs/development.md` — build, tests, tools, diagnostics, repository
-    tracking rules.
+  - `docs/development.md` — build, tests, diagnostics, repository rules.
   - `docs/history.md` — archive: dated failure analysis plus the chronological
     log that used to be `FINDINGS.md`. Never present it as the current design.
   - `docs/qwen-asr-api.md`, `docs/doubao-auc-api.md` — vendor API notes.
-- Do not reintroduce per-module readmes, `WhyThisArchWork.md` files, or a
-  generic fcitx5 tutorial set; those were merged or removed in 2026-10.
+- Do not reintroduce per-module readmes, `WhyThisArchWork.md` files, a generic
+  fcitx5 tutorial set, or a `tools/` directory of one-off probes; those were
+  removed in 2026-10. Hardware checks are the ignored Rust test plus the
+  diagnostic log.
 - Durable claims (archive name, download size, config path, default value,
   test count) are verified against the code or the upstream API before they
   ship. See `found.md` #12.
-- Commit source, build files, packaging files, tests, tools, `config/*.example`,
-  `docs/`, `README*`, `LICENSE`, `AGENTS.md`, `found.md`. Never commit build
-  output, `compile_commands.json`, runtime `config/*.json`, `~/.config` or
-  `~/.cache` contents, models, diagnostic logs, or editor/IDE state
-  (`.idea/`, `.vscode/`). The full list is in `docs/development.md`.
-- Build: meson (`meson.build`, `meson_options.txt`, per-dir `meson.build`).
-  Packaging: PKGBUILD (Arch). Verification: `ninja -C build` + tests under
-  `tests/`. Meson install carries the fcitx5 addon files **and** the udev
-  rule (`lib/udev/rules.d`); `PKGBUILD.install` reloads udev on
-  install/upgrade.
+- Commit `rust/`, `shell/`, `docs/`, `udev/`, build and packaging files,
+  `README*`, `LICENSE`, `AGENTS.md`, `found.md`. Never commit build output,
+  `rust/target/`, `compile_commands.json`, runtime config, `~/.config` or
+  `~/.cache` contents, models, diagnostic logs, or editor/IDE state. The full
+  list is in `docs/development.md`.
+- Build: meson drives `cargo build` for `rust/` and links the static archive
+  into `ainput.so`; `meson test` runs the Rust unit tests.
+  Packaging: PKGBUILD (Arch), makedepends include `cargo`.
+  Verification: `ninja -C build`, `meson test -C build`, and (for capture or
+  queue changes) `cargo test --lib -- --ignored` for the microphone test.
+  Meson install carries the addon files **and** the udev rule
+  (`lib/udev/rules.d`); `PKGBUILD.install` reloads udev on install/upgrade.
 - Release chain: repo → GitHub (`origin`) + Gitee (`gitee`, PKGBUILD source) →
   AUR (`aur/fcitx5-ainput-git`). For a `-git` package AUR and paru can only
   display the **static** `pkgver=` placeholder (they cannot run `pkgver()`),
@@ -137,7 +143,8 @@ who want fast push-to-talk dictation without leaving the keyboard.
   `docs/development.md`, `docs/history.md`, plus vendor notes
   (`docs/qwen-asr-api.md`, `docs/doubao-auc-api.md`). `docs/history.md` is an
   archive (dated analysis + old engineering log) and must never be presented
-  as the current design.
+  as the current design. `README.md` and `README.zh-CN.md` stay structurally
+  identical.
 
 ## Current Cloud Model Status (verified 2026-10)
 
@@ -152,8 +159,8 @@ who want fast push-to-talk dictation without leaving the keyboard.
 - Cross-vendor wire unification was evaluated and rejected: Doubao uses a
   submit/query poll protocol with `X-Api-Key` headers and header-based status
   codes, Qwen uses a synchronous Bearer-auth JSON call. Vendors stay one
-  provider each behind `IAsrProvider`; only the config schema is unified.
-- JSON parsing helpers live in `src/qwen_json.h` and are unit-tested in
-  `tests/test_qwen_json.cpp`. When Alibaba deprecates the next model,
-  the expected fix is a config/example/doc update, not code — unless the wire
-  protocol itself changes.
+  provider each behind `Provider`; only the config schema is unified.
+- When Alibaba deprecates the next model, the expected fix is a config/template
+  /doc update, not code — unless the wire protocol itself changes. The request
+  format is chosen from the model name in `rust/src/asr/qwen.rs`
+  (`legacy_format`).

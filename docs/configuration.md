@@ -1,157 +1,126 @@
 # Configuration Reference
 
-Everything user-editable lives in `~/.config/ainput/`. Defaults are built into
-the code — files are **optional and sparse**: create only what you want to
-change, copy nothing you don't. `//` line comments are allowed in every file.
+Ainput has two configuration surfaces, split by who owns the data.
 
-Repository examples live in `config/*.example`; they are documentation, not
-runtime files.
+| Surface | File | Edited with |
+|---------|------|-------------|
+| Shared settings (backend, key timing, audio pipeline) | `~/.config/fcitx5/conf/ainput.conf` | **fcitx5-configtool** (Addons → Ainput) or the file directly |
+| Per-provider data (credentials, model ids, paths) | `~/.config/ainput/<provider>.json` | A text editor |
 
-```
-~/.config/ainput/
-├── config.json        # provider selection + [ui] + [audio]
-├── qwen.json          # cloud provider (api_key, model, ...)
-├── doubao.json
-├── zipformer.json     # local providers (model_dir, ...)
-└── fire_red.json
-```
+The split is deliberate: settings that affect the whole addon belong to fcitx5,
+so they appear in its configuration UI and are written back the same way every
+other addon writes its settings. Credentials and model paths stay in plain
+files, where they can carry comments and be backed up or removed independently.
 
-## Self-healing templates
+## Shared settings
 
-`config.json`, `qwen.json` and `doubao.json` **regenerate whenever they are
-found missing**: every config read checks for the file, and a missing one is
-recreated as a commented template (mode `0600`). Want the template back? Just
-rename the file away — the next recognition or provider switch recreates it.
-Existing files are never touched. Local provider files are not seeded; they
-work with built-in defaults once the models are installed.
+Owned by fcitx5's configuration system. Edit them in
+`fcitx5-configtool` → *Addons* → *Ainput*, or edit
+`~/.config/fcitx5/conf/ainput.conf` while fcitx5 is **not** running (fcitx5
+rewrites the file on exit).
 
-Seeded credential templates carry `"api_key": "PASTE_YOUR_KEY_HERE"`, which
-counts as *not configured*: recognition fails with
-`Ainput: fill api_key in ~/.config/ainput/qwen.json` until you replace it.
-The tracked `config/*.example` files use the same placeholder, so copying an
-example and forgetting to edit it gives the same actionable message.
-The first recognition on a fresh install therefore walks the user straight
-to a self-documenting file — no manual hunting for docs.
+| Option | Default | Meaning |
+|--------|---------|---------|
+| `Provider` | `qwen` | Backend: `qwen`, `doubao`, `zipformer`, `fire_red`, `mock`. `Ctrl+CapsLock` switching rewrites this |
+| `ActivationMsec` | `300` | How long CapsLock must be held before recording starts (50–5000) |
+| `NotificationTimeout` | `2000` | How long switch notifications stay visible (200–20000 ms) |
+| `DebounceCount` | `2` | Synthetic CapsLock events swallowed after the restore tap |
+| `Denoise` | `none` | `none`, `speexdsp`, or `deepfilter` |
+| `LufsTarget` | `-16.0` | Loudness normalization target in LUFS; values outside (-100, 0) fall back to the default |
+| `SpeexLevel` | `-15` | speexdsp suppression strength in dB (-100–0) |
+| `CrestThreshold` | `2.4` | Speech gate. Lower is more permissive; `0` disables the gate |
 
-There is no system-wide `/etc` default layer and no pacnew dance: package
-upgrades never touch user files. The auto-detected device buffer cache lives
-in `~/.cache/ainput/pa_buffer.json` — it is state, not configuration, and
-regenerates itself.
+fcitx5 only writes options that differ from their default, so the file stays
+short. Missing options mean "default".
 
-## Boundary (repo side)
+`Denoise` is `none` out of the box. `speexdsp` needs no extra software.
+`deepfilter` requires an executable at
+`~/.local/share/ainput/bin/deep-filter`; when it is missing the recording is
+**not** silently processed undenoised — the status panel reports
+`Ainput: local engine setup error: ...` and the recording is discarded.
 
-- Track `*.example` in Git; never track real `*.json` (`.gitignore` covers `config/*.json`).
-- Real API keys and paths belong only in `~/.config/ainput/`.
+## Provider files
 
-## `config.json` — global file
+Stored in `~/.config/ainput/`. Every file is created automatically on first run
+with **all** fields present, their default values, and English comments, so
+opening one shows everything that can be set. `//` line comments are supported
+and are stripped before parsing.
 
-| Key | Default | Purpose |
-|-----|---------|---------|
-| `provider` | `qwen` | Active ASR backend: `qwen` \| `doubao` \| `zipformer` \| `fire_red` \| `mock`. Missing or empty falls back to `qwen`; the schema still warns about a missing key. `Ctrl+CapsLock` switching rewrites this line |
-| `ui.activation_msec` | `300` | How long CapsLock must be held |
-| `ui.notification_timeout` | `2000` | Switch notification duration (ms) |
-| `ui.debounce_count` | `2` | Key-release debounce samples |
-| `audio.denoise` | *(unset = none)* | `speexdsp` \| `deepfilter` \| `none`. `deepfilter` needs `~/.local/share/ainput/bin/deep-filter` |
-| `audio.lufs_target` | `-16.0` | Loudness target for gain normalization |
-| `audio.speex_level` | `-15` | speexdsp suppression level (dB) |
-| `audio.crest_threshold` | `2.4` | Crest-based speech gate; `0` disables |
+Files are re-read before every recognition, so edits apply to the next
+recording without restarting fcitx5. Local provider files
+(`zipformer.json`, `fire_red.json`) are optional: they are only needed to
+override a path or a timeout.
 
-## `qwen.json` keys
-
-| Key | Default | Purpose |
-|-----|---------|---------|
-| `api_key` | (required) | Plaintext DashScope API key; keep the file mode 0600 |
-| `model` | `qwen-audio-3.1-asr-flash` | ASR model ID, e.g. `qwen-audio-3.0-asr-flash`, `fun-asr-flash-2026-06-15`, or legacy `qwen3-asr-flash` (wire format auto-detected per model family) |
-| `endpoint` | `https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation` | Full request URL; switch to the `{WorkspaceId}.cn-beijing.maas.aliyuncs.com` domain when migrating |
-| `language_hints` | (auto-detect) | JSON array of language codes, e.g. `["zh","en"]` (max 4) |
-| `keep_dialect` | `false` | `qwen-audio-3.1-asr-flash` only: keep dialect wording |
-| `speaker_diarization` | `false` | `qwen-audio-3.1-asr-flash` only: label speakers |
-| `vocabulary` | (off) | Instant hot words `{"word": weight}`; weight 1–5, or 50 for super hot words |
-| `vocabulary_id` | (off) | Precompiled hot-word list ID from the DashScope console |
-| `timeout_sec` | `60` | Whole-request curl timeout |
-
-## `doubao.json` keys
-
-| Key | Default | Purpose |
-|-----|---------|---------|
-| `api_key` | (required) | Plaintext ByteDance API key; keep the file mode 0600 |
-| `resource_id` | (required) | ByteDance resource ID, e.g. `volc.seedasr.auc` |
-| `model_name` | `bigmodel` | `request.model_name` sent to the submit API |
-| `enable_itn` | `true` | Inverse text normalization |
-| `enable_punc` | `true` | Punctuation restoration |
-| `timeout_sec` | `90` | Whole-recognition budget: submit + result polling share one deadline |
-
-## `zipformer.json` / `fire_red.json` keys
-
-| Key | Default | Purpose |
-|-----|---------|---------|
-| `model_dir` | `~/.local/share/ainput/models/...` | sherpa-onnx model directory |
-| `timeout_sec` | `120` | Local binary wall-clock timeout |
-| `bin_path` | `~/.local/share/ainput/sherpa-onnx/bin/...` | sherpa-onnx binary (`sherpa-onnx` for zipformer, `sherpa-onnx-offline` for fire_red) |
-
-## API keys (plaintext)
-
-Cloud API keys are plain `api_key` fields in the vendor JSON — there is no
-secret store integration (removed 2026-10 by design). Protect the files:
+Keep credentials private:
 
 ```bash
 chmod 600 ~/.config/ainput/qwen.json ~/.config/ainput/doubao.json
 ```
 
-## Comments
+API keys are plaintext fields by design; there is no secret-store integration.
 
-Every config file supports `//` line comments. They are stripped before
-validation and parsing (string-aware, byte offsets preserved), so
-`"https://..."` values are never mangled:
+### `qwen.json`
 
-```json
-{
-    // switch back after testing the local models
-    "provider": "qwen",
-    "audio": { "crest_threshold": 0 }  // keep gating off on this mic
-}
-```
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `api_key` | — (required) | DashScope key. The placeholder `PASTE_YOUR_KEY_HERE` counts as unset |
+| `model` | `qwen-audio-3.1-asr-flash` | Model id. The request format is chosen from the model name; `qwen3-asr-flash` still works |
+| `endpoint` | DashScope Beijing URL | Full request URL |
+| `language_hints` | `[]` | Language codes, at most 4. Empty = auto-detect |
+| `vocabulary` | `{}` | Instant hot words `{"term": weight}`, weight 1–5 (50 = super hot) |
+| `vocabulary_id` | `""` | Precompiled hot-word list id |
+| `keep_dialect` | `false` | Keep dialect wording (`qwen-audio-3.1-asr-flash` only) |
+| `speaker_diarization` | `false` | Label speakers (`qwen-audio-3.1-asr-flash` only) |
+| `timeout_sec` | `60` | Whole-request timeout |
 
-## Config validation
+### `doubao.json`
 
-Every config file is validated on read against a schema
-(`ASR_provider/src/config_schema.h`):
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `api_key` | — (required) | Volcengine app key |
+| `resource_id` | `volc.seedasr.auc` | Product tier |
+| `model_name` | `bigmodel` | Sent as `request.model_name` |
+| `enable_itn` | `true` | Inverse text normalization |
+| `enable_punc` | `true` | Punctuation restoration |
+| `timeout_sec` | `90` | Whole-recognition budget: submit and polling share it |
 
-- JSON syntax errors are pinpointed with a byte offset. They are written to
-  the fcitx5 log; for a provider file they also reach the input panel on the
-  next recognition as `Ainput: Qwen: qwen.json: ...`. A malformed file's
-  values are not trusted (defaults apply).
-- Unknown or misspelled fields get a "did you mean" suggestion
-  (`"modelname" (did you mean "model"?)`), type mismatches are named
-  (`field "timeout_sec" expects an integer`), and missing required fields are
-  reported — these warnings go to the fcitx5 log, and the first one is also
-  appended to that provider's switch notification (`Ctrl+CapsLock`) as a
-  `⚠` line.
-- Retired fields (e.g. `request_style`, `max_polls`, `num_threads`) are
-  flagged as unknown so stale files tell you they do nothing.
+### `zipformer.json` / `fire_red.json`
 
-Cloud provider configs are re-read on the worker thread before every
-recognition, so model/parameter changes take effect on the next recording
-without restarting fcitx5. Local provider configs (`zipformer.json`,
-`fire_red.json`) are read when the provider object is created; after editing
-one, switch provider away and back with `Ctrl+CapsLock` or restart fcitx5.
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `model_dir` | `~/.local/share/ainput/models/...` | Model directory |
+| `bin_path` | `~/.local/share/ainput/sherpa-onnx/bin/...` | Engine binary |
+| `timeout_sec` | `120` | Wall-clock timeout for one recognition |
 
-### Migration notes (2026-10)
+## Validation
 
-Files from the older layout are no longer read. If you upgraded from it:
+Every file is validated on read:
 
-- `advanced.json` → its keys were split into the per-provider files and
-  `config.json`'s `[audio]` section.
-- `vinput.json` and `audio.json` → merged into `config.json`.
-- A system-wide `/etc` default layer, the fcitx5 `DefaultProvider` option,
-  and the `request_style` / `max_polls` / `num_threads` knobs were removed;
-  the remaining knobs are the ones in the tables above.
-- `pa_buffer.json` moved from `~/.config/ainput/` to `~/.cache/ainput/`
-  (it is state, not configuration).
+- JSON syntax errors are reported with a byte offset, and the file's values are
+  not trusted (defaults apply).
+- Unknown fields get a "did you mean" suggestion; type mismatches and missing
+  required fields are named.
+- Problems go to the fcitx5 log. The first problem in a provider file is also
+  appended to that provider's `Ctrl+CapsLock` notification as a `⚠` line.
 
-## Update Rule
+## Migration from 0.1
 
-When adding a new runtime config key, update the relevant `.example`, this
-document, the quick-start section in both README files, and the schema in
-`ASR_provider/src/config_schema.h` — schemas live next to the module and must
-change together with the readers.
+0.1 kept everything in `~/.config/ainput/config.json`. On first start, 0.2
+reads that file, copies its values into fcitx5's configuration, and renames it
+to `config.json.migrated` — nothing is deleted, and the values (including a
+hand-tuned `crest_threshold: 0`) are carried over rather than reset.
+
+After the rename the old file is no longer read. A startup message in the
+fcitx5 log names the new location.
+
+## Adding a setting
+
+A new shared option goes in three places:
+
+1. `AinputConfig` in `shell/ainput.cpp`
+2. the `AinputSettings` struct in `shell/ainput_core.h`
+3. `Settings` in `rust/src/settings.rs`
+
+A new per-provider key goes in `rust/src/config.rs` (schema) and
+`rust/src/templates.rs` (visible default), and `tests/templates_list_every_field`
+fails until both are updated.

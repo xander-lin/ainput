@@ -4,7 +4,7 @@
 
 fcitx5 的按住说话语音输入插件：按住 **CapsLock** 说话，松开后识别结果直接
 插入光标处。Ainput（**a**udio **input**）是一个运行在 Linux 桌面上的小型
-fcitx5 addon。
+fcitx5 addon。面向 fcitx5 的那一层用 C++，采集、音频处理与识别后端用 Rust。
 
 ## 功能
 
@@ -25,6 +25,7 @@ fcitx5 addon。
 
 - 安装了 fcitx5 的 Linux 桌面（`fcitx5`、`libpulse`、`libebur128`、
   `libcurl`、`speexdsp`、`libsoxr`）
+- 从源码构建另需 C++20 编译器、Meson、Ninja 与 Rust 工具链
 - 使用本地引擎时另需 `sherpa-onnx` 二进制与模型文件（可选，合计约 1.3 GB）
 
 ## 安装
@@ -78,11 +79,12 @@ fcitx5 -r
 
 ## 配置
 
-配置位于 `~/.config/ainput/`，**全部可选**：默认值编译在代码里，
-`config.json`、`qwen.json`、`doubao.json` 缺失时会自动生成带注释的模板
-（权限 `0600`）。所有文件都支持 `//` 注释。
+**共享设置**（后端、按住时长、降噪器、音频参数）存在 fcitx5 自己的配置里，
+可直接在 **fcitx5-configtool** 的 *附加组件 → Ainput* 中修改。
 
-云端最小配置 —— 填上 key 就能用：
+**各后端的数据**（凭据、模型 ID、路径）在 `~/.config/ainput/*.json`。这些文件
+在首次运行时自动生成，**所有字段都写出来**并带默认值与注释，打开就知道能改
+什么。云端最小配置：
 
 ```json
 // ~/.config/ainput/qwen.json
@@ -97,7 +99,7 @@ fcitx5 -r
 建议收紧权限：`chmod 600 ~/.config/ainput/{qwen,doubao}.json`。
 Key 以明文保存，项目有意不集成密钥环。
 
-完整配置项、默认值、校验规则以及旧版配置的迁移说明见
+完整配置项、默认值、校验规则以及 0.1 → 0.2 的迁移说明见
 [`docs/configuration.md`](docs/configuration.md)。
 
 ## 本地模型（可选）
@@ -158,12 +160,16 @@ fcitx5 -r
 **提示 recognition queue full。** 同时最多接受 3 次录音，等
 `recognizing...` 结束即可。
 
+**fcitx5-configtool 里看不到 Ainput 的设置。** 确认插件已成功加载过（重启一次
+fcitx5），且 configtool 与 fcitx5 版本一致。设置保存在
+`~/.config/fcitx5/conf/ainput.conf`。
+
 ## 文档
 
 - [`docs/configuration.md`](docs/configuration.md) —— 全部配置项与默认值
 - [`docs/architecture.md`](docs/architecture.md) —— 模块边界、后端接口、
   如何新增后端
-- [`docs/development.md`](docs/development.md) —— 构建、测试、工具、诊断日志、
+- [`docs/development.md`](docs/development.md) —— 构建、测试、诊断日志、
   仓库提交约定
 - [`docs/history.md`](docs/history.md) —— 带日期的故障分析与工程日志
   （归档，不是当前规范）

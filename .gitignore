@@ -1,7 +1,7 @@
-# Build output (repo root only — a bare "src/" would also hide the
-# tracked ASR_provider/src and adapter/src directories)
+# Build output
 /build/
 /builddir/
+/build-*/
 /compile_commands.json
 /pkg/
 /src/
@@ -9,13 +9,15 @@
 /log.txt
 *.pkg.tar.*
 
+# Rust build artefacts (the meson build puts these in the build tree, but a
+# bare `cargo build` uses these)
+/rust/target/
+Cargo.lock.bak
+
 # Python environments and caches
 .venv/
 __pycache__/
 *.pyc
-
-# Runtime configuration: only config/*.example is tracked
-config/*.json
 
 # Editor / IDE state
 .idea/
