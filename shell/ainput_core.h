@@ -36,6 +36,7 @@ typedef struct {
     const char *provider;         // e.g. "qwen"; NULL means default
     int32_t activation_msec;
     int32_t notification_timeout;
+    int32_t buffer_ms;            // PulseAudio fragment size
     int32_t denoise;              // AINPUT_DENOISE_*
     double lufs_target;
     int32_t speex_level;

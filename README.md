@@ -174,6 +174,10 @@ its own message (`fill api_key in ...`, `API key rejected`, `network error`,
 **Recognition queue full.** At most three recordings are accepted at once.
 Wait for `recognizing...` to finish.
 
+**Settings went wrong.** Delete `~/.config/fcitx5/conf/ainput.conf` while
+fcitx5 is stopped and start it again: the file is regenerated with every option
+and its default.
+
 **Settings don't appear in fcitx5-configtool.** The addon must have loaded at
 least once (restart fcitx5), and `fcitx5-configtool` must be from the same
 fcitx5 version. Settings are stored in `~/.config/fcitx5/conf/ainput.conf`.

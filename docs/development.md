@@ -113,6 +113,21 @@ Order matters: the denoiser needs the leading noise to build a profile, which
 is why trimming runs last. A steady tone is rejected by the crest gate by
 design — speech has sharper peaks than a sine wave.
 
+## Configuration options
+
+Shared settings live in `AinputConfig` in `shell/ainput.cpp`. Two rules:
+
+- A setting that only matters when something goes wrong (buffer size, loudness
+  target, suppression level, speech gate) is a `fcitx::HiddenOption`. It is
+  written to `~/.config/fcitx5/conf/ainput.conf` and can be edited there, but it
+  does not appear in fcitx5-configtool. Hiding rather than removing keeps the
+  file complete and fcitx5's regeneration intact.
+- A setting a user actually chooses (backend, hold time, notification timeout,
+  denoiser choice, credentials) stays a plain `Option`.
+
+A new option also needs a field in `AinputSettings` (`shell/ainput_core.h`) and
+in `Settings` (`rust/src/settings.rs`), plus a clamp in `Settings::sanitized`.
+
 ## Repository conventions
 
 Tracked: `rust/`, `shell/`, `docs/`, `udev/`, `meson.build`,

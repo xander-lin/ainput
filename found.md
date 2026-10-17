@@ -508,8 +508,10 @@
   padding every utterance and delaying recognition by the same amount. A 20 ms
   drain does complete one final fragment (1047 ms captured) but buys ~20 ms of
   tail for 20 ms of latency, which is a bad trade for speech.
-  Final state: `BUFFER_MS = 20`, `TAIL_DRAIN = 0`, GUI option removed,
-  `audio/capture_buffer` logs the value applied.
+  Third pass: the size is `BufferMs` again, default 20, clamped to 6–1000 ms,
+  but registered as a `HiddenOption` so it is settable in the file and absent
+  from the settings dialog. `TAIL_DRAIN = 0`; `audio/capture_buffer` logs the
+  value applied.
 - **Deeper finding (same day)**: the old detector's "hardware burst period" was
   an artefact. Reproducing its exact algorithm (`buffer_detect.cpp:171-290`) on
   this machine's timings yields **64000 bytes = 2.0 s** — the identical number
@@ -559,6 +561,14 @@
   - When a past fix is attributed to a device ("this USB mic needs 64K"), check
     whether the blocking I/O primitive was actually the cause before building a
     device model around it.
+  - Hiding an option (`fcitx::HiddenOption`) is the right answer for a value
+    that exists but should not be a user decision: it stays in the file,
+    keeps fcitx5's regeneration, and disappears from the dialog. Removing the
+    option entirely would have made the file lossy.
+  - When a config file is deleted while fcitx5 runs, fcitx5 recreates it from
+    the in-memory configuration on exit — the "factory reset" only works if
+    the process is stopped first. Verify a reset with a throwaway `HOME`
+    rather than by deleting the live file.
   - Do not add a flush/drain window without measuring what it actually
     recovers. "Drain for one buffer" sounds principled but can be pure padding:
     here it recorded extra audio rather than retrieving lost audio, and the

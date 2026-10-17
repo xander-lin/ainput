@@ -160,6 +160,10 @@ fcitx5 -r
 **提示 recognition queue full。** 同时最多接受 3 次录音，等
 `recognizing...` 结束即可。
 
+**配置改乱了想恢复默认。** 先停掉 fcitx5，删除
+`~/.config/fcitx5/conf/ainput.conf`，再启动：文件会用全部选项和默认值重新
+生成。
+
 **fcitx5-configtool 里看不到 Ainput 的设置。** 确认插件已成功加载过（重启一次
 fcitx5），且 configtool 与 fcitx5 版本一致。设置保存在
 `~/.config/fcitx5/conf/ainput.conf`。

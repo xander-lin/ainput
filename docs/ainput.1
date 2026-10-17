@@ -79,20 +79,12 @@ How long switch notifications stay visible, in milliseconds.
 \fBDenoise\fP (default \fBnone\fP)
 none, speexdsp or deepfilter. deepfilter needs a helper binary at
 ~/.local/share/ainput/bin/deep-filter.
-.TP
-\fBLufsTarget\fP (default \fB-16\fP)
-Loudness normalization target in LUFS.
-.TP
-\fBSpeexLevel\fP (default \fB-15\fP)
-speexdsp suppression strength in dB.
-.TP
-\fBCrestThreshold\fP (default \fB2.4\fP)
-Speech gate; lower is more permissive, 0 disables it.
 .PP
-The microphone fragment size is fixed at 20 ms in code. It is not
-configurable: PulseAudio delivers exactly the requested amount, and audio
-still buffered but not yet a full fragment is discarded at stop, so a smaller
-fragment is always better for tail loss and the only cost is wakeup count.
+\fBBufferMs\fP (20), \fBLufsTarget\fP (-16), \fBSpeexLevel\fP (-15) and
+\fBCrestThreshold\fP (2.4) are written to the file but hidden from the
+settings dialog: they are pipeline details rather than choices a user needs
+to make. Deleting the file and restarting fcitx5 regenerates it with every
+option and its default commented out.
 .PP
 Four further options accept credentials and model ids so a fresh install can
 be configured entirely here: \fBQwenApiKey\fP, \fBQwenModel\fP,

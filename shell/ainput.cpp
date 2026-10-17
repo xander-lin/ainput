@@ -111,14 +111,26 @@ FCITX_CONFIGURATION(
         this, "NotificationTimeout",
         "How long the Ctrl+CapsLock switch notification stays on screen (ms)",
         2000, fcitx::IntConstrain(200, 20000)};
+    // Exposed in the config file but hidden from the settings dialog: the
+    // default (20 ms, four times the measured hardware floor) is right for
+    // almost everyone. Raise it only on a device that clips the end of a
+    // phrase; the value is an implementation detail, not a knob.
+    fcitx::HiddenOption<int, fcitx::IntConstrain> bufferMs{
+        this, "BufferMs", "Microphone fragment size in ms", 20,
+        fcitx::IntConstrain(6, 1000)};
     fcitx::Option<AinputDenoise> denoise{
         this, "Denoise", "Noise reduction method", AinputDenoise::none};
-    fcitx::Option<double, fcitx::NoConstrain<double>, fcitx::DoubleMarshaller> lufsTarget{
+    // Denoiser tuning stays in the file but out of the dialog: picking a
+    // denoiser is a user decision, tuning its suppression level is not.
+    fcitx::HiddenOption<double, fcitx::NoConstrain<double>, fcitx::DoubleMarshaller> lufsTarget{
         this, "LufsTarget", "Loudness normalization target (LUFS)", -16.0};
-    fcitx::Option<int, fcitx::IntConstrain> speexLevel{
+    fcitx::HiddenOption<int, fcitx::IntConstrain> speexLevel{
         this, "SpeexLevel", "speexdsp suppression strength (dB)", -15,
         fcitx::IntConstrain(-100, 0)};
-    fcitx::Option<double, fcitx::NoConstrain<double>, fcitx::DoubleMarshaller> crestThreshold{
+    // No "unset" sentinel here: default 2.4 doubles as "not configured",
+    // because the marshaller leaves the default in place when the key is
+    // absent from the file.
+    fcitx::HiddenOption<double, fcitx::NoConstrain<double>, fcitx::DoubleMarshaller> crestThreshold{
         this, "CrestThreshold", "Speech gate; 0 disables", 2.4};
 
     // ---- credentials and model ids ----
@@ -302,6 +314,7 @@ private:
         settings.provider = provider.c_str();
         settings.activation_msec = config_.activationMsec.value();
         settings.notification_timeout = config_.notificationTimeout.value();
+        settings.buffer_ms = config_.bufferMs.value();
         settings.denoise = denoiseToInt(config_.denoise.value());
         settings.lufs_target = config_.lufsTarget.value();
         settings.speex_level = config_.speexLevel.value();

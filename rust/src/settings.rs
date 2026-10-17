@@ -89,6 +89,9 @@ pub struct Settings {
     pub provider: String,
     pub activation_msec: i32,
     pub notification_timeout: i32,
+    /// Microphone fragment size. Default 20; only worth raising on a device
+    /// that clips the end of a phrase.
+    pub buffer_ms: i32,
     pub denoise: Denoise,
     pub lufs_target: f64,
     pub speex_level: i32,
@@ -102,6 +105,7 @@ impl Default for Settings {
             provider: "qwen".to_string(),
             activation_msec: 300,
             notification_timeout: 2000,
+            buffer_ms: 20,
             denoise: Denoise::None,
             lufs_target: -16.0,
             speex_level: -15,
@@ -117,6 +121,7 @@ impl Settings {
     pub fn sanitized(mut self) -> Self {
         self.activation_msec = self.activation_msec.clamp(50, 5000);
         self.notification_timeout = self.notification_timeout.clamp(200, 20000);
+        self.buffer_ms = self.buffer_ms.clamp(6, 1000);
         if !(self.lufs_target > -100.0 && self.lufs_target < 0.0) {
             self.lufs_target = -16.0;
         }
@@ -167,14 +172,22 @@ mod tests {
     }
 
     #[test]
-    fn capture_constants_are_consistent() {
-        use crate::capture::{BUFFER_MS, TAIL_DRAIN};
-        // 16 kHz mono S16 = 32 bytes per millisecond.
-        assert_eq!(BUFFER_MS * 32, 640, "20 ms = 640 bytes");
-        assert!(BUFFER_MS >= 6, "must stay above the ~5.4 ms hardware floor");
+    fn capture_defaults_are_sane() {
+        use crate::capture::TAIL_DRAIN;
         // Measured: nothing is in flight at stop, so waiting cannot recover
         // audio and would only pad the recording with new audio.
         assert_eq!(TAIL_DRAIN, std::time::Duration::ZERO);
+
+        let settings = Settings::default();
+        assert_eq!(settings.buffer_ms, 20);
+        // 16 kHz mono S16 = 32 bytes per millisecond.
+        assert_eq!(settings.buffer_ms as u32 * 32, 640);
+
+        // The floor measured on real hardware was 5.375 ms; the clamp must
+        // never let the value go below where PulseAudio starts rounding up.
+        let mut tiny = Settings::default();
+        tiny.buffer_ms = 1;
+        assert_eq!(tiny.sanitized().buffer_ms, 6);
     }
 
     #[test]

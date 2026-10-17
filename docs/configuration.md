@@ -25,9 +25,17 @@ rewrites the file on exit).
 | `ActivationMsec` | `300` | How long CapsLock must be held before recording starts (50–5000) |
 | `NotificationTimeout` | `2000` | How long the `Ctrl+CapsLock` switch notification stays on screen (200–20000 ms) |
 | `Denoise` | `none` | `none`, `speexdsp`, or `deepfilter` |
-| `LufsTarget` | `-16.0` | Loudness normalization target in LUFS; values outside (-100, 0) fall back to the default |
-| `SpeexLevel` | `-15` | speexdsp suppression strength in dB (-100–0) |
-| `CrestThreshold` | `2.4` | Speech gate. Lower is more permissive; `0` disables the gate |
+
+Options marked *file only* are hidden from fcitx5-configtool. They are written
+to the file and can be edited there, but they are not decisions most users
+should be asked to make:
+
+| Option | Default | Meaning | |
+|--------|---------|---------|---|
+| `BufferMs` | `20` | Microphone fragment size (6–1000 ms). Raise only if the end of a phrase is cut off | *file only* |
+| `LufsTarget` | `-16.0` | Loudness normalization target in LUFS | *file only* |
+| `SpeexLevel` | `-15` | speexdsp suppression strength in dB | *file only* |
+| `CrestThreshold` | `2.4` | Speech gate; `0` disables it | *file only* |
 
 fcitx5 only writes options that differ from their default, so the file stays
 short. Missing options mean "default".
@@ -54,10 +62,12 @@ Precedence, highest first: fcitx5-configtool → provider JSON → built-in
 default. The `Ctrl+CapsLock` notification shows the model that will actually
 run, including a GUI override.
 
-### Why there is no buffer setting
+### The microphone buffer
 
-The microphone fragment size is fixed in code at 20 ms (640 bytes). It is not
-exposed because there is nothing to tune and nothing to detect:
+`BufferMs` defaults to 20 ms (640 bytes) and is hidden from the settings
+dialog because only one case calls for changing it: a device that clips the
+very end of a phrase. It is not auto-detected, because there is nothing to
+detect:
 
 - PulseAudio delivers **exactly** the requested number of bytes per wakeup. A
   measurement on a real device requesting 5/10/20/50/100/200/400 ms returned
@@ -72,6 +82,7 @@ exposed because there is nothing to tune and nothing to detect:
   stop the delivered sample count equals the recording duration (0 ms in
   flight, five trials), so waiting cannot recover audio — it only appends new
   audio and delays recognition.
+- The measured hardware floor is 5.375 ms; the clamp stops at 6 ms.
 
 The old "64K works, 4K loses the tail" problem came from `pa_simple_read`,
 which blocks until it has the full requested byte count. The current
@@ -149,6 +160,25 @@ Every file is validated on read:
   required fields are named.
 - Problems go to the fcitx5 log. The first problem in a provider file is also
   appended to that provider's `Ctrl+CapsLock` notification as a `⚠` line.
+
+## Resetting to defaults
+
+Delete the file and restart fcitx5:
+
+```bash
+rm ~/.config/fcitx5/conf/ainput.conf   # or move it aside
+fcitx5 -r
+```
+
+`addon.conf` declares `Configurable=True`, and fcitx5 regenerates a complete
+file on load: every option appears, defaults as commented `#Key=value` lines
+and anything you had changed as `Key=value`. Do this while fcitx5 is
+**stopped** if you want a true factory reset — fcitx5 writes the in-memory
+configuration back on exit, so deleting the file under a running process just
+recreates it with the old values.
+
+The per-provider JSON files self-heal the same way: delete one and the next
+recognition recreates it with every field, its default and comments.
 
 ## Migration from 0.1
 

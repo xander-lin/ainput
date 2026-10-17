@@ -28,20 +28,13 @@ use crate::settings::Settings;
 use crate::wav;
 
 /// Bytes of 16 kHz mono S16 audio per millisecond.
+///
+/// The fragment size comes from settings (`BufferMs`, default 20). PulseAudio
+/// echoes the request back verbatim (measured: 6/10/20/50/100 ms all granted
+/// exactly), down to a ~5.4 ms hardware floor where it rounds up. The setting
+/// therefore only bounds how much audio can sit in a partial fragment, and the
+/// default is four times that floor.
 const BYTES_PER_MS: u32 = 32;
-
-/// Fragment size requested from PulseAudio.
-///
-/// The server delivers at most this many bytes per wakeup and the request is
-/// echoed back verbatim (measured: 6/10/20/50/100 ms requests all granted
-/// exactly), down to the ~5.4 ms hardware floor where it rounds up.
-/// It is not a setting: there is no per-device optimum, and the value only
-/// bounds how much audio can sit in a partial fragment at any instant.
-///
-/// 20 ms is chosen over the floor because it is 4x the measured floor (safe on
-/// slower devices) while keeping the capture loop at ~50 wakeups/second, which
-/// matters less than the 2 ms poll interval already in place.
-pub const BUFFER_MS: u32 = 20;
 /// How long to wait for the stream to reach READY before giving up.
 const READY_TIMEOUT: Duration = Duration::from_secs(3);
 /// Poll interval while recording; bounds stop latency.
@@ -233,7 +226,7 @@ fn run_capture<F>(
         }
     };
 
-    let fragsize = BUFFER_MS * BYTES_PER_MS;
+    let fragsize = settings.buffer_ms.max(1) as u32 * BYTES_PER_MS;
     let attr = pulse::def::BufferAttr {
         maxlength: u32::MAX,
         tlength: u32::MAX,
@@ -246,7 +239,7 @@ fn run_capture<F>(
         "capture_buffer",
         &[
             ("recognition_id", recognition_id.to_string()),
-            ("buffer_ms", BUFFER_MS.to_string()),
+            ("buffer_ms", settings.buffer_ms.to_string()),
             ("fragsize_bytes", fragsize.to_string()),
         ],
     );
