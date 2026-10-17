@@ -100,7 +100,7 @@ fcitx5 -r
 建议收紧权限：`chmod 600 ~/.config/ainput/{qwen,doubao}.json`。
 Key 以明文保存，项目有意不集成密钥环。
 
-完整配置项、默认值、校验规则以及 0.1 → 0.2 的迁移说明见
+完整配置项、默认值、校验规则以及 旧 `config.json` 的迁移说明见
 [`docs/configuration.md`](docs/configuration.md)。
 
 ## 本地模型（可选）

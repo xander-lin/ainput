@@ -7,10 +7,13 @@ _pkgname=fcitx5-ainput
 # pkgver()). Keep it at the current real version so the AUR listing is not
 # stale; the authoritative version is computed from git history by pkgver()
 # below at build time. Bump this + regenerate .SRCINFO before pushing to AUR.
-pkgver=0.2.0.r1.g0000000
+pkgver=0.1.0.r1.g0000000
 pkgrel=1
 pkgdesc="Voice input addon for fcitx5: push-to-talk ASR via CapsLock"
-arch=('x86_64')
+# Both are first-class: nothing in the addon is architecture specific (the
+# Rust core uses no intrinsics and the C++ shell is plain fcitx5 glue). The
+# dependency set must exist in Arch Linux ARM before claiming aarch64.
+arch=('x86_64' 'aarch64')
 url="https://github.com/xander-lin/ainput"
 license=('MIT')
 depends=('fcitx5' 'libebur128' 'libpulse' 'curl' 'speexdsp' 'libsoxr')
@@ -21,7 +24,7 @@ sha256sums=('SKIP')
 
 pkgver() {
     cd "$_pkgname"
-    printf "0.2.0.r%s.%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+    printf "0.1.0.r%s.%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
 }
 
 build() {

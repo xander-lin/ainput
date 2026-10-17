@@ -29,7 +29,7 @@ who want fast push-to-talk dictation without leaving the keyboard.
   (`Ainput Qwen [timer] encode/network/parse` logs, `diagnostic_log` events).
 - Every provider must degrade loudly and recoverably: cancellable requests,
   curl handle eviction on transport failure, actionable error strings.
-- Configuration split (2026-10, 0.2):
+- Configuration split (2026-10, Rust rewrite):
   - Shared settings (provider, key timing, denoise, audio tuning) live in
     fcitx5's own `Configuration`, so they appear in `fcitx5-configtool` and land
     in `~/.config/fcitx5/conf/ainput.conf`. fcitx5 writes only non-defaults.
@@ -37,9 +37,9 @@ who want fast push-to-talk dictation without leaving the keyboard.
     `~/.config/ainput/<provider>.json`. Every file is seeded on first run with
     **all** fields, their defaults and English comments; a template that omits a
     field fails `templates_list_every_field`.
-  - There is no `config.json` anymore. The 0.1 file is migrated once into
-    `ainput.conf` and renamed to `config.json.migrated` so migration cannot run
-    twice and overwrite later UI changes.
+  - There is no `config.json` anymore. The pre-rewrite file is migrated once
+    into `ainput.conf` and renamed to `config.json.migrated` so migration cannot
+    run twice and overwrite later UI changes.
   - No `/etc` layer, and no pacnew dance: package upgrades never touch user
     files.
 - Generated config templates are English only. `README.zh-CN.md` is the only

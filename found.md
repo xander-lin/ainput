@@ -420,7 +420,7 @@
 
 ## 16. Generated config must migrate exactly once (found 2026-10)
 
-- **Mistake/context**: The 0.2 migration reads the 0.1 `config.json`, copies its
+- **Mistake/context**: The rewrite's migration reads the old `config.json`, copies its
   values into fcitx5's configuration, and left the original in place. On the
   next start it would run again and overwrite anything the user had since
   changed in `fcitx5-configtool`.

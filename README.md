@@ -108,7 +108,7 @@ be set. Minimum for a cloud provider:
 Protect the credential files: `chmod 600 ~/.config/ainput/{qwen,doubao}.json`.
 Keys are plaintext; there is no secret-store integration by design.
 
-Full reference, defaults, validation rules and the 0.1 → 0.2 migration:
+Full reference, defaults, validation rules and the migration from the old `config.json`:
 [`docs/configuration.md`](docs/configuration.md).
 
 ## Local models (optional)

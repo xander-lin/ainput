@@ -197,12 +197,13 @@ recreates it with the old values.
 The per-provider JSON files self-heal the same way: delete one and the next
 recognition recreates it with every field, its default and comments.
 
-## Migration from 0.1
+## Migration from `config.json`
 
-0.1 kept everything in `~/.config/ainput/config.json`. On first start, 0.2
-reads that file, copies its values into fcitx5's configuration, and renames it
-to `config.json.migrated` — nothing is deleted, and the values (including a
-hand-tuned `crest_threshold: 0`) are carried over rather than reset.
+The pre-rewrite addon kept everything in `~/.config/ainput/config.json`. On
+first start, the current build reads that file, copies its values into
+fcitx5's configuration, and renames it to `config.json.migrated` — nothing is
+deleted, and the values (including a hand-tuned `crest_threshold: 0`) are
+carried over rather than reset.
 
 After the rename the old file is no longer read. A startup message in the
 fcitx5 log names the new location.
