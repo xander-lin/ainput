@@ -4,6 +4,11 @@
 //! and POD structs. See `shell/ainput_core.h` for the contract.
 
 mod asr;
+
+/// Minimal re-exports for the manual cloud smoke test.
+pub mod smoke {
+    pub use crate::asr::{create, Input, Provider};
+}
 mod capture;
 mod config;
 mod diagnostic;
