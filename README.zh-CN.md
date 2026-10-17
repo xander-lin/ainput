@@ -30,11 +30,15 @@ fcitx5 addon。面向 fcitx5 的那一层用 C++，采集、音频处理与识�
 
 ## 安装
 
-Arch Linux（AUR）：
+Arch Linux（AUR）——二选一，两者安装的文件相同：
 
 ```bash
-paru -S fcitx5-ainput-git
+paru -S fcitx5-ainput-bin   # 预编译，支持 x86_64 与 aarch64，无需编译
+paru -S fcitx5-ainput-git   # 从最新提交构建
 ```
+
+预编译包要求 glibc 2.39 或更新，因为发布产物是针对该版本链接的。系统较旧时
+请用 `-git`。
 
 从源码构建：
 

@@ -36,11 +36,15 @@ Rust.
 
 ## Install
 
-Arch Linux (AUR):
+Arch Linux (AUR) — pick one, they install the same files:
 
 ```bash
-paru -S fcitx5-ainput-git
+paru -S fcitx5-ainput-bin   # prebuilt; x86_64 and aarch64, no compiling
+paru -S fcitx5-ainput-git   # builds from the latest commit
 ```
+
+The prebuilt package needs glibc 2.39 or newer, because that is what the
+release artifacts were linked against. Use `-git` if your system is older.
 
 From source:
 

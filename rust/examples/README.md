@@ -14,6 +14,7 @@ ceremony than signal. Each one answers one question.
 | `http_reuse` | Transport-only cost of a cold connection vs a kept-alive one | network |
 | `reuse_gain` | The same A/B on real recognitions (what the user feels) | `<dir>`, an API key |
 | `capture_cost` | CPU cost of the capture poll loop per second of audio | nothing |
+| `conn_check` | Is the connection actually reused? Prints the local port per request | network |
 
 Build them with `--features diagnostics` to get the `qwen_timing` stage log
 lines (`encode_ms` / `network_ms` / `parse_ms`).
