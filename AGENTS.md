@@ -112,7 +112,12 @@ who want fast push-to-talk dictation without leaving the keyboard.
   Meson install carries the addon files **and** the udev rule
   (`lib/udev/rules.d`); `PKGBUILD.install` reloads udev on install/upgrade.
 - Release chain: repo → GitHub (`origin`) + Gitee (`gitee`, PKGBUILD source) →
-  AUR (`aur/fcitx5-ainput-git`). For a `-git` package AUR and paru can only
+  AUR. **Two packages, two AUR repos**: `fcitx5-ainput-git` (source at `master`)
+  and `fcitx5-ainput-bin` (the GitHub release artifact, `PKGBUILD.bin`). They
+  install identical files, so `-bin` declares `conflicts=('fcitx5-ainput-git')`
+  and `provides=('fcitx5-ainput')`; `replaces` is inert because paru installs
+  AUR packages with `pacman -U`. Full procedure in `docs/development.md`.
+  For a `-git` package AUR and paru can only
   display the **static** `pkgver=` placeholder (they cannot run `pkgver()`),
   so keep that placeholder at the real current version and regenerate
   `.SRCINFO` (`makepkg --printsrcinfo > /tmp/x && [ -s /tmp/x ] && cp /tmp/x
@@ -123,6 +128,11 @@ who want fast push-to-talk dictation without leaving the keyboard.
   The web page (`/packages/<name>`) flips over **before** the RPC index does,
   so when RPC still says `resultcount: 0` check the page before assuming the
   push failed.
+- aarch64 is cross-compiled (`tools/cross-aarch64.sh`), not tested: there is no
+  arm machine. Only the object format, the dependency list and the exported
+  symbols are verified. Say so in release notes rather than implying support.
+- The prebuilt artifacts require **glibc 2.39+** (linked on current Arch). Keep
+  that in the README: a user on an older system must use `-git`.
 - Renaming a package on AUR is not possible; the procedure is: publish the new
   `pkgbase` first, then file a **Deletion** request for the old one and link
   the replacement (`/pkgbase/<old>` -> Package Actions -> Submit Request).

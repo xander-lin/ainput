@@ -178,6 +178,57 @@ against the code or upstream before shipping. See `found.md` #12.
 
 ### Release chain
 
-repo -> GitHub (`origin`) + Gitee (`gitee`, the PKGBUILD source) -> AUR
-(`aur/fcitx5-ainput-git`). Keep the static `pkgver=` placeholder current and
-regenerate `.SRCINFO` before pushing to AUR. Details in `AGENTS.md`.
+repo -> GitHub (`origin`) + Gitee (`gitee`, the PKGBUILD source) -> AUR.
+
+Two AUR packages, two separate AUR repositories:
+
+| Package | Built from | AUR repo |
+|---|---|---|
+| `fcitx5-ainput-git` | source at `master` (`PKGBUILD` in this repo) | `fcitx5-ainput-git.git` |
+| `fcitx5-ainput-bin` | the GitHub release artifact (`PKGBUILD.bin` in this repo) | `fcitx5-ainput-bin.git` |
+
+They install the same files, so `-bin` declares `conflicts=(fcitx5-ainput-git)`
+and `provides=(fcitx5-ainput)`. Only one can be installed.
+
+#### Cutting a release
+
+1. Bump the version in `meson.build`, `rust/Cargo.toml` and `PKGBUILD`, and the
+   man page date/version in `docs/ainput.1`. Regenerate `rust/Cargo.lock`.
+2. Build both architectures:
+   ```bash
+   meson setup build --buildtype=release && ninja -C build
+   tools/cross-aarch64.sh <aarch64-sysroot> <version>
+   ```
+   The cross script needs a sysroot with the target's headers and link-time
+   `.so` stubs only — every dependency is linked dynamically, so the full
+   runtime dependency closure is *not* needed. It refuses to publish when the
+   aarch64 dependency list differs from the native one.
+3. Produce the artifacts and their checksums:
+   ```bash
+   tools/make-release.sh <version> x86_64
+   tools/make-release.sh <version> aarch64
+   ```
+   It refuses to publish if `ainput.so` is not staged. That guard exists
+   because meson prepends `PKG_CONFIG_SYSROOT_DIR` to install paths, which once
+   produced a tarball containing everything except the addon.
+4. Put the two sha256 values into `PKGBUILD.bin` (`sha256sums_x86_64`,
+   `sha256sums_aarch64`) and push `PKGBUILD.bin` + `PKGBUILD.install` to the
+   `-bin` AUR repo with a regenerated `.SRCINFO`.
+5. Tag and publish:
+   ```bash
+   git tag -a <version> -m "..." && git push origin master <version>
+   gh release create <version> dist/*.tar.zst dist/*.sha256
+   ```
+6. Keep the static `pkgver=` placeholder in `PKGBUILD` current and regenerate
+   its `.SRCINFO` before pushing to the `-git` AUR repo.
+
+The release URL uses the tag verbatim (`/releases/download/<version>/`). A
+`v` prefix there produces a 404 that only shows up when building the package
+from the published release, never from a local copy of the artifact.
+
+#### Architecture support
+
+`x86_64` is built and tested on the development machine. `aarch64` is
+cross-compiled; it is **not** run on arm hardware, so only the object format,
+the dependency list and the exported symbols are checked. Treat aarch64 as
+"should work, unverified" until someone reports otherwise.
