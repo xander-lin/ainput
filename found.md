@@ -576,3 +576,114 @@
   - Compare *content length to recording length* when validating a capture
     pipeline. A mismatch of exactly the drain duration is the signature of
     padding rather than recovery.
+
+## 19. A watchdog that fires once is not a watchdog (found 2026-10)
+
+- **Mistake/context**: The Rust rewrite added a one-second event-loop timer that
+  force-stops a recording after 120 s and clears a stale CapsLock debounce
+  counter. The callback returned `true`. It was deployed, documented in
+  `docs/architecture.md`, and described in the changelog as a working safety
+  net. A temporary log line showed it fired **once**, one second after startup,
+  and never again. Both protections had been dead since they were written.
+- **Root cause**: fcitx5 creates time sources as `ONESHOT` (it calls
+  `sd_event_add_time` without re-arming). Returning `true` from the callback
+  keeps the source alive but does **not** schedule it again. Every periodic
+  timer inside fcitx5 itself uses `setNextInterval()` (or `setTime()`) plus
+  `setOneShot()` from inside the callback. `setNextInterval` alone is also not
+  enough when the source has already been disabled — `setEnabled(true)` or
+  `setOneShot()` is what re-arms it. The behaviour is not in the type signature
+  and the callback's `bool` return reads like "keep going".
+- **Why nothing caught it**: a watchdog is by definition silent until the rare
+  condition it guards. There is no user-visible symptom, no assertion, and the
+  unit tests live on the Rust side, where the timer does not exist. This is the
+  same failure class as the silent CapsLock-restore bug (#9): a protection that
+  degrades invisibly.
+- **Correction**: `shell/periodic.h` provides `rearmPeriodic()` and every
+  periodic source must call it; the watchdog was verified end-to-end by setting
+  `MaxRecordingSec=8`, starting a recording, and watching the log
+  (`recording exceeded 8 s, force-stopping`). The limit is now the configurable
+  `MaxRecordingSec` (default 120, `0` disables) instead of a hard-coded
+  constant.
+- **Prevention**:
+  - Any timer that is supposed to repeat must be proven to repeat: add a
+    temporary log (or a counter test) and count the fires over a window before
+    declaring it works. "I registered a repeating-looking callback" is not
+    evidence.
+  - When porting to an unfamiliar event loop, copy the *pattern* from that
+    project's own periodic timers rather than composing one from the API
+    surface; fcitx5's own `setNextInterval` + `setOneShot` pairing is the
+    reference.
+  - A watchdog or safety net deserves the same verification as the happy path,
+    because it is the only code that runs when something else already went
+    wrong. Trigger the condition deliberately instead of reasoning that it
+    would fire.
+
+## 20. Three silent-failure regressions found by reviewing the rewrite (found 2026-10)
+
+- **Mistake/context**: A review of the finished rewrite found three cases where
+  the old C++ implementation did the right thing and the new code quietly did
+  not:
+  1. **Provider chosen at recognition time, not capture time.** `Engine::start`
+     snapshotted the settings, but the job carried only the WAV path and
+     credentials; `recognize()` read a process-global provider. Switching
+     backend mid-recording (`Ctrl+CapsLock`) sent the audio to the new backend.
+     Measured: recording started on `mock`, switched to `qwen` before release,
+     and the job produced `Qwen HTTP 400`.
+  2. **The cancellation flag was never set.** Every provider checked
+     `input.cancel`, and the shell had a "cancelled" error branch, but no code
+     path ever stored `true`. Two further layers hid this: `shutdown()` joined
+     the worker without cancelling, so `fcitx5 -r` blocked for the rest of a
+     60–120 s network timeout; and even after wiring cancellation through,
+     libcurl's progress callback — the only place the flag is read during a
+     transfer — was never invoked because progress reporting was off. Fixing
+     the flag alone changed nothing; the test still took 29.5 s.
+  3. **The status line was never cleared.** `setAuxUp()` had no counterpart, so
+     `processing audio...` stayed in the input panel after the text landed. The
+     old `onDeactivate` called `inputPanel().reset()`.
+- **Root cause**: The rewrite reproduced the *interfaces* faithfully but not the
+  *call sites*. Reading the new code alone, each piece looks correct; the bug is
+  the missing caller. Compounding it, cancellation had two independent dead
+  layers, so fixing the obvious one produced no observable change.
+- **Why nothing caught it**: All three need a second action after the first
+  (switch backend, shut down mid-request, wait for the panel to clear). Unit
+  tests exercised each unit in isolation.
+- **Correction**: The provider travels inside the job; `shutdown()` sets the
+  active cancel flag and the worker drops queued jobs; `easy.progress(true)`
+  keeps the callback live; `commitPending` clears the aux line and erases the
+  target. Each fix has a regression test that fails when the fix is reverted —
+  verified by reverting them (29.5 s shutdown, `error:6` instead of
+  `text:hello world`).
+- **Prevention**:
+  - When rewriting a subsystem, diff the *call sites*, not just the types. Ask
+    "who used to call this, and does the new code call it?" for every hook:
+    cancel, reset, cleanup, drain, snapshot.
+  - A flag that is read but never written is dead code that looks like
+    functionality. Grep for `store(`/`Set()` alongside the reads before
+    believing a cancellation or shutdown path exists.
+  - Verify a cancellation fix by making the test *require* cancellation to
+    finish in time (a server that accepts and then never answers). Against a
+    refused connection the test passes either way and proves nothing.
+  - A test that passes both before and after a fix is not a regression test.
+    Temporarily revert the fix and confirm the test fails.
+
+## 21. Parallel tests sharing process-wide state (found 2026-10)
+
+- **Mistake/context**: Two Rust tests called `std::env::set_var("HOME", ...)`
+  and a third mutated a global provider selection. Individually they passed;
+  the suite failed intermittently (1 in ~4 runs) with unrelated assertions,
+  which invited the conclusion "the code is flaky" rather than "the tests
+  interfere".
+- **Root cause**: the default Rust harness runs tests on parallel threads in
+  one process. `HOME`, the active-credentials slot and the provider selection
+  are process-wide, so one test's setup silently changed another's inputs.
+- **Correction**: `config::test_lock()` serialises tests that touch global
+  state, `config::test_config_dir()` replaces the `HOME` mutation with an
+  explicit override, and the global provider was deleted entirely once it
+  became unnecessary (the job carries its own).
+- **Prevention**:
+  - Never mutate environment variables in a test. Provide an explicit override
+    plus a lock, or take the path as a parameter.
+  - Intermittent failures in a suite are usually interference; get the failing
+    test to name the shared state before adding sleeps or retries.
+  - Run the suite in a loop (8x here) after changing test isolation. A green
+    single run proves nothing when the failure rate is 1 in 4.

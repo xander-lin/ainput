@@ -8,7 +8,7 @@
 //! a misconfiguration produces a specific message instead of a cryptic exit
 //! code.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
@@ -132,7 +132,7 @@ impl Sherpa {
         })
     }
 
-    fn arguments(&self, settings: &Settings, wav: &PathBuf) -> Vec<String> {
+    fn arguments(&self, settings: &Settings, wav: &Path) -> Vec<String> {
         let dir = settings.model_dir.to_string_lossy().to_string();
         let mut args = Vec::new();
         match self.flavor {
@@ -248,7 +248,7 @@ impl Provider for Sherpa {
             }
         }
 
-        let args = self.arguments(&settings, &input.wav_path.to_path_buf());
+        let args = self.arguments(&settings, input.wav_path);
         let mut child = Command::new(&settings.bin_path)
             .args(&args)
             .stdout(Stdio::piped())

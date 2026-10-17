@@ -9,23 +9,29 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace ainput {
 
-struct OutputTarget {
-    fcitx::ICUUID uuid = {};
-    uint64_t statusSequence = 0;
-    uint64_t recognitionId = 0;
+/// Delivery stages, mirrored from the core's AINPUT_STAGE_*.
+enum class Stage {
+    Recognizing = 1,
 };
 
 /// Delivers text and status from arbitrary threads back into the fcitx5 event
 /// loop through a self-pipe.
 ///
-/// A result whose original input context is gone is delivered to the currently
-/// focused context and logged, instead of being dropped silently: the user
-/// just finished speaking and expects the text to appear somewhere they can
-/// see.
+/// Threading: submit()/showStatus()/showStage() may be called from any thread
+/// and only touch the pending queue. Every fcitx5 call — resolving the target
+/// input context, touching the input panel, committing text — happens inside
+/// drainAndCommit() on the event loop thread. Callers must not resolve input
+/// contexts themselves: mostRecentInputContext() and the context manager are
+/// not thread-safe.
+///
+/// A result whose original input context is gone falls back to the currently
+/// focused context, and is logged rather than dropped silently: the user just
+/// finished speaking and expects the text to appear somewhere they can see.
 class OutputHandler {
 public:
     explicit OutputHandler(fcitx::Instance *instance);
@@ -34,11 +40,15 @@ public:
     OutputHandler(const OutputHandler &) = delete;
     OutputHandler &operator=(const OutputHandler &) = delete;
 
-    void submit(const OutputTarget &target, const std::string &text,
-                std::function<void()> onCommitted = {});
-    void showStatus(const OutputTarget &target, const std::string &text,
-                    std::function<void()> onShown = {});
-    OutputTarget captureCurrentUuid(uint64_t recognitionId = 0);
+    /// Remembers which input context started a recording. Event loop thread.
+    void rememberTarget(uint64_t recognitionId);
+
+    void submit(uint64_t recognitionId, const std::string &text);
+    void showStatus(uint64_t recognitionId, const std::string &text);
+    void showStage(uint64_t recognitionId, Stage stage);
+
+    /// Shows a message about the addon itself (no recording attached).
+    void showGlobalStatus(const std::string &text);
 
 private:
     fcitx::Instance *instance_;
@@ -49,20 +59,26 @@ private:
     struct Pending {
         std::string text;
         bool isStatus = false;
-        fcitx::ICUUID targetUuid = {};
-        uint64_t statusSequence = 0;
         uint64_t recognitionId = 0;
+        // Status messages from an older recording must not overwrite a newer
+        // one; recorded when the message is enqueued.
+        uint64_t sequence = 0;
+        fcitx::ICUUID explicitUuid = {};
         std::function<void()> completion;
     };
     std::mutex pendingMutex_;
     std::vector<Pending> pending_;
 
+    /// recognition id -> uuid captured when recording started. Event loop only.
+    std::unordered_map<uint64_t, fcitx::ICUUID> targets_;
     uint64_t latestStatusSequence_ = 0;
 
-    void enqueue(const OutputTarget &target, const std::string &text,
-                 bool isStatus, std::function<void()> completion);
+    void enqueue(Pending pending);
     void drainAndCommit();
-    void commitPending(Pending pending, const char *label);
+    void commitPending(Pending pending);
+    void showStatusNow(const fcitx::ICUUID &uuid, const std::string &text,
+                       uint64_t sequence);
+    fcitx::ICUUID resolve(const Pending &pending);
     void wake();
 };
 

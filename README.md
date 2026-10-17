@@ -68,8 +68,8 @@ CapsLock restore. See [Troubleshooting](#troubleshooting).
 | Switch denoiser | **Ctrl+CapsLock**, then **↑ / ↓** (or **k / j**) |
 
 While recording, the input panel shows `listening...`; after release it moves
-through `processing audio...` and `recognizing...` to either the text or an
-actionable error.
+through `processing audio...` and `recognizing...`, then the line disappears and
+either the text is inserted or an actionable error is shown.
 
 ## ASR backends
 

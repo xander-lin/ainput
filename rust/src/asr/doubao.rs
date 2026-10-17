@@ -196,7 +196,7 @@ fn message_of(body: &Value, headers: &Response, fallback: &str) -> String {
 
 impl Provider for Doubao {
     fn transcribe(&self, input: &Input<'_>) -> Result<String> {
-        let settings = Settings::load(&input.credentials)?;
+        let settings = Settings::load(input.credentials)?;
         if input.cancel.load(Ordering::Relaxed) {
             return Err(Error::timeout("cancelled"));
         }

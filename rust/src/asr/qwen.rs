@@ -61,7 +61,7 @@ impl Settings {
             .or_else(|| Credentials::value(file_key))
             .ok_or_else(|| {
                 Error::config_missing(
-                    "fill QwenApiKey in fcitx5-configtool, or api_key in                      ~/.config/ainput/qwen.json",
+                    "fill QwenApiKey in fcitx5-configtool, or api_key in ~/.config/ainput/qwen.json",
                 )
             })?;
 
@@ -256,7 +256,7 @@ fn classify(status: u64, code: &str, message: &str) -> crate::error::Category {
 
 impl Provider for Qwen {
     fn transcribe(&self, input: &Input<'_>) -> Result<String> {
-        let settings = Settings::load(&input.credentials)?;
+        let settings = Settings::load(input.credentials)?;
         if input.cancel.load(Ordering::Relaxed) {
             return Err(Error::timeout("cancelled"));
         }

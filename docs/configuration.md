@@ -24,6 +24,7 @@ rewrites the file on exit).
 | `Provider` | `qwen` | Backend: `qwen`, `doubao`, `zipformer`, `fire_red`, `mock`. `Ctrl+CapsLock` switching rewrites this |
 | `ActivationMsec` | `300` | How long CapsLock must be held before recording starts (50–5000) |
 | `NotificationTimeout` | `2000` | How long the `Ctrl+CapsLock` switch notification stays on screen (200–20000 ms) |
+| `MaxRecordingSec` | `120` | Force-stop a recording after this long, in seconds (0 = never). The safety net for a lost key-release event |
 | `Denoise` | `none` | `none`, `speexdsp`, or `deepfilter` |
 
 Options marked *file only* are hidden from fcitx5-configtool. They are written
@@ -39,6 +40,22 @@ should be asked to make:
 
 fcitx5 only writes options that differ from their default, so the file stays
 short. Missing options mean "default".
+
+### The recording limit
+
+`MaxRecordingSec` exists because a release event can go missing: a compositor
+switch, a focus change, or a duplicate synthetic CapsLock can leave the addon
+believing the key is still held. Without a limit the microphone stays open until
+fcitx5 restarts.
+
+- Default `120` seconds. The check runs once per second, so the actual stop
+  happens at most about two seconds after the limit.
+- `0` disables the watchdog entirely. Do that only if you trust your input
+  stack; a stuck recording then has no recovery short of restarting fcitx5.
+- Values are clamped to 5–3600, and anything negative is read as `0`.
+
+Watch the log if this ever fires: `recording exceeded <n> s, force-stopping`
+means a key release was lost, not that dictation is broken.
 
 ### Credentials and model ids
 

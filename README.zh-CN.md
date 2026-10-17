@@ -62,7 +62,8 @@ fcitx5 -r
 | 切换降噪器 | **Ctrl+CapsLock**，然后 **↑ / ↓**（或 **k / j**） |
 
 录音时输入框旁显示 `listening...`；松开后依次经过 `processing audio...`、
-`recognizing...`，最后要么上屏文本，要么显示一条可操作的错误提示。
+`recognizing...`，随后提示行消失，最后要么上屏文本，要么显示一条可操作的
+错误提示。
 
 ## 识别后端
 

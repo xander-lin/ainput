@@ -12,7 +12,53 @@ use serde_json::Value;
 
 use crate::templates;
 
+/// Test-only stand-in for `$HOME`. Tests that need a config directory must use
+/// this instead of `std::env::set_var("HOME", ...)`: the test harness runs them
+/// on parallel threads in one process, so mutating the environment makes every
+/// other file-reading test race against it.
+#[cfg(test)]
+static TEST_CONFIG_DIR: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
+#[cfg(test)]
+static TEST_CONFIG_DIR_GUARD: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Serialises tests that touch process-wide state (config directory, active
+/// credentials). Hold this for the whole test.
+#[cfg(test)]
+pub fn test_lock() -> std::sync::MutexGuard<'static, ()> {
+    TEST_CONFIG_DIR_GUARD.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Points the config layer at `dir`. The caller must already hold
+/// `test_lock()`; the previous value is returned so it can be restored.
+#[cfg(test)]
+pub fn test_config_dir(dir: PathBuf) -> PathBuf {
+    TEST_CONFIG_DIR
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .replace(dir)
+        .unwrap_or_default()
+}
+
+#[cfg(test)]
+pub fn restore_config_dir(previous: PathBuf) {
+    if let Ok(mut slot) = TEST_CONFIG_DIR.lock() {
+        *slot = if previous.as_os_str().is_empty() {
+            None
+        } else {
+            Some(previous)
+        };
+    }
+}
+
 pub fn config_dir() -> PathBuf {
+    #[cfg(test)]
+    if let Some(dir) = TEST_CONFIG_DIR
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+    {
+        return dir.clone();
+    }
     match std::env::var("HOME") {
         Ok(home) if !home.is_empty() => PathBuf::from(home).join(".config/ainput"),
         _ => PathBuf::from("/tmp/ainput_cfg"),
@@ -420,7 +466,9 @@ mod tests {
 
     #[test]
     fn tilde_expands_to_home() {
-        std::env::set_var("HOME", "/tmp/ainput-home-test");
-        assert_eq!(expand_path("~/x"), PathBuf::from("/tmp/ainput-home-test/x"));
+        // Read-only: never mutates HOME, so parallel tests are unaffected.
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+        assert_eq!(expand_path("~/x"), PathBuf::from(format!("{home}/x")));
+        assert_eq!(expand_path("/abs/x"), PathBuf::from("/abs/x"));
     }
 }

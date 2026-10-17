@@ -4,8 +4,9 @@
 //! APIs are told exactly that, so the reader is deliberately narrow: it
 //! accepts the canonical 44-byte PCM header and rejects anything else loudly.
 
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 
 use crate::error::{Error, Result};
@@ -32,7 +33,15 @@ pub fn write(path: &Path, samples: &[i16]) -> Result<()> {
     header[36..40].copy_from_slice(b"data");
     header[40..44].copy_from_slice(&data_bytes.to_le_bytes());
 
-    let mut file = File::create(path).map_err(|e| {
+    // 0600: the intermediate WAV contains the user's speech. File::create
+    // would give it 0644 and would also follow a symlink planted at the path.
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(path)
+        .map_err(|e| {
         Error::audio_data(format!("cannot create {}: {e}", path.display()))
     })?;
     file.write_all(&header)
@@ -72,7 +81,7 @@ pub fn read(path: &Path) -> Result<Vec<i16>> {
     }
     let data = &bytes[44..];
     Ok(data
-        .chunks_exact(2)
+        .chunks(2)
         .map(|pair| i16::from_le_bytes([pair[0], pair[1]]))
         .collect())
 }
@@ -90,6 +99,19 @@ mod tests {
         write(&path, &samples).unwrap();
         assert_eq!(read(&path).unwrap(), samples);
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn wav_files_are_not_world_readable() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join("ainput-wav-test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("private.wav");
+        let _ = std::fs::remove_file(&path);
+        write(&path, &[1i16, -2, 3]).unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(mode, 0o600, "recorded speech must not be world readable");
     }
 
     #[test]

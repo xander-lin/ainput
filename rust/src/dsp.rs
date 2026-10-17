@@ -115,7 +115,7 @@ pub fn has_voice(samples: &[i16], crest_threshold: f64) -> bool {
     let _ = remainder;
     unsafe { dsp::speex_preprocess_state_destroy(state) };
 
-    let total = frame_count + usize::from(samples.len() % FRAME_SIZE > 0);
+    let total = frame_count + usize::from(!samples.len().is_multiple_of(FRAME_SIZE));
     if total == 0 {
         return voice_frames >= MIN_VOICE_FRAMES;
     }

@@ -30,12 +30,16 @@ typedef struct {
     // only reports outcomes.
     void (*on_error)(void *user, uint64_t recognition_id, int32_t category,
                      const char *detail);
+    // Optional, may be NULL. Fires when a queued recording starts being
+    // recognized, so the shell can show that stage. stage is AINPUT_STAGE_*.
+    void (*on_stage)(void *user, uint64_t recognition_id, int32_t stage);
 } AinputCallbacks;
 
 typedef struct {
     const char *provider;         // e.g. "qwen"; NULL means default
     int32_t activation_msec;
     int32_t notification_timeout;
+    int32_t max_recording_sec;    // watchdog: force-stop after this long
     int32_t buffer_ms;            // PulseAudio fragment size
     int32_t denoise;              // AINPUT_DENOISE_*
     double lufs_target;
@@ -71,6 +75,10 @@ enum {
     AINPUT_ERR_AUDIO_DATA = 11,
     AINPUT_ERR_RUNTIME = 12,
     AINPUT_ERR_UNKNOWN = 13,
+};
+
+enum {
+    AINPUT_STAGE_RECOGNIZING = 1,
 };
 
 enum {

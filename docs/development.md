@@ -52,7 +52,7 @@ with enum values copied from the headers.
 ## Tests
 
 ```bash
-meson test -C build          # 48 unit tests, no hardware
+meson test -C build          # Rust unit tests, no hardware
 cd rust && cargo test        # same thing directly
 cargo test --lib -- --ignored   # records from the real microphone
 ```

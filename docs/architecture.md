@@ -77,8 +77,17 @@ counter is reserved **before** anything is created and released exactly once on
 every path — success, provider error, capture error, or worker shutdown — so a
 full queue can never become permanent.
 
-Two watchdogs cover dropped key events: a recording older than 120 s is stopped,
-and a debounce counter that saw no CapsLock traffic for 10 s is cleared.
+One watchdog covers dropped key events. It runs every second and does two
+things: a recording older than `MaxRecordingSec` (default 120 s, configurable,
+0 = off) is force-stopped, and a debounce counter that saw no CapsLock traffic
+for 10 s is cleared.
+
+The periodic rearm is easy to get wrong: fcitx5 creates time events as
+ONESHOT, so a callback returning `true` keeps the source alive but does *not*
+schedule it again. Every periodic timer must call
+`setNextInterval()` + `setOneShot()` from inside its own callback
+(`shell/periodic.h`). Forgetting this makes a timer fire once and then go
+silent, which no test and no user-visible symptom would catch.
 
 ## Provider contract
 

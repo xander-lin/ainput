@@ -1,10 +1,10 @@
 //! Runtime settings.
 //!
 //! The authoritative source is fcitx5's `Configuration` (visible in
-//! fcitx5-configtool). The shell pushes a snapshot here after every change, so
-//! a recording always uses the settings that were current when it started.
-//! Provider credentials and model paths are NOT part of this struct: they live
-//! in the per-provider JSON files.
+//! fcitx5-configtool). The shell pushes a snapshot on every change; each
+//! recording captures its own copy, so a recording always uses the settings
+//! that were current when it started — including the provider, which travels
+//! with the job instead of being read globally at recognition time.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Denoise {
@@ -89,6 +89,9 @@ pub struct Settings {
     pub provider: String,
     pub activation_msec: i32,
     pub notification_timeout: i32,
+    /// Watchdog: force-stop a recording that never saw its key release.
+    /// Default 120 s; 0 disables it.
+    pub max_recording_sec: i32,
     /// Microphone fragment size. Default 20; only worth raising on a device
     /// that clips the end of a phrase.
     pub buffer_ms: i32,
@@ -105,6 +108,7 @@ impl Default for Settings {
             provider: "qwen".to_string(),
             activation_msec: 300,
             notification_timeout: 2000,
+            max_recording_sec: 120,
             buffer_ms: 20,
             denoise: Denoise::None,
             lufs_target: -16.0,
@@ -121,6 +125,13 @@ impl Settings {
     pub fn sanitized(mut self) -> Self {
         self.activation_msec = self.activation_msec.clamp(50, 5000);
         self.notification_timeout = self.notification_timeout.clamp(200, 20000);
+        // Negative would mean "disable"; anything else huge is still bounded
+        // so a typo cannot pin the microphone open for a day.
+        self.max_recording_sec = if self.max_recording_sec <= 0 {
+            0
+        } else {
+            self.max_recording_sec.clamp(5, 3600)
+        };
         self.buffer_ms = self.buffer_ms.clamp(6, 1000);
         if !(self.lufs_target > -100.0 && self.lufs_target < 0.0) {
             self.lufs_target = -16.0;
@@ -150,18 +161,24 @@ mod tests {
 
     #[test]
     fn gui_model_overrides_the_file_for_display() {
+        // Touches the config directory and the active credentials, both of
+        // which are process-wide; serialise with the other such tests.
+        let _lock = crate::config::test_lock();
         // The switch notification must show what will actually run.
-        let mut credentials = Credentials::default();
-        credentials.qwen_model = "qwen-audio-3.0-asr-flash".to_string();
-        set_active_credentials(credentials);
-        let home = std::env::temp_dir().join("ainput-display-test");
-        std::fs::create_dir_all(home.join(".config/ainput")).unwrap();
+        let credentials = Credentials {
+            qwen_model: "qwen-audio-3.0-asr-flash".to_string(),
+            ..Credentials::default()
+        };
+        set_active_credentials(credentials.clone());
+        let dir = std::env::temp_dir().join("ainput-display-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
-            home.join(".config/ainput/qwen.json"),
+            dir.join("qwen.json"),
             r#"{"api_key": "sk-file", "model": "from-file"}"#,
         )
         .unwrap();
-        std::env::set_var("HOME", &home);
+        let previous = crate::config::test_config_dir(dir);
         assert_eq!(
             crate::asr::display_name("qwen"),
             "Qwen · qwen-audio-3.0-asr-flash"
@@ -169,6 +186,8 @@ mod tests {
         // Clearing the override falls back to the file.
         set_active_credentials(Credentials::default());
         assert_eq!(crate::asr::display_name("qwen"), "Qwen · from-file");
+        set_active_credentials(Credentials::default());
+        crate::config::restore_config_dir(previous);
     }
 
     #[test]
@@ -185,21 +204,46 @@ mod tests {
 
         // The floor measured on real hardware was 5.375 ms; the clamp must
         // never let the value go below where PulseAudio starts rounding up.
-        let mut tiny = Settings::default();
-        tiny.buffer_ms = 1;
+        let tiny = Settings {
+            buffer_ms: 1,
+            ..Settings::default()
+        };
         assert_eq!(tiny.sanitized().buffer_ms, 6);
+    }
+
+    #[test]
+    fn watchdog_limit_is_configurable_and_bounded() {
+        assert_eq!(Settings::default().max_recording_sec, 120);
+
+        let clamp = |value: i32| {
+            Settings {
+                max_recording_sec: value,
+                ..Settings::default()
+            }
+            .sanitized()
+            .max_recording_sec
+        };
+        assert_eq!(clamp(30), 30);
+        // 0 and negatives disable the watchdog.
+        assert_eq!(clamp(0), 0);
+        assert_eq!(clamp(-5), 0);
+        // A typo must not leave the microphone open for a day.
+        assert_eq!(clamp(999_999), 3600);
+        assert_eq!(clamp(1), 5);
     }
 
     #[test]
     fn removing_debounce_kept_the_other_limits() {
         // The debounce option was retired; the rest of the clamping must stay.
-        let mut settings = Settings::default();
-        settings.activation_msec = 10_000;
-        settings.notification_timeout = 1;
-        settings.speex_level = 5;
-        settings.crest_threshold = -1.0;
-        settings.lufs_target = 0.0;
-        let clamped = settings.sanitized();
+        let clamped = Settings {
+            activation_msec: 10_000,
+            notification_timeout: 1,
+            speex_level: 5,
+            crest_threshold: -1.0,
+            lufs_target: 0.0,
+            ..Settings::default()
+        }
+        .sanitized();
         assert_eq!(clamped.activation_msec, 5000);
         assert_eq!(clamped.notification_timeout, 200);
         assert_eq!(clamped.speex_level, 0);

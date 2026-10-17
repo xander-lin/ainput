@@ -67,6 +67,12 @@ pub fn post_json(
         .map_err(|e| TransportError::Network(e.to_string()))?;
     easy.signal(false)
         .map_err(|e| TransportError::Network(e.to_string()))?;
+    // CURLOPT_PROGRESSFUNCTION is only invoked when progress reporting is on.
+    // libcurl enables it for this easy handle by default, but nothing in the
+    // types says so, and if it were off the callback below would never run and
+    // a stuck request could only end through its own timeout.
+    easy.progress(true)
+        .map_err(|e| TransportError::Network(e.to_string()))?;
 
     let mut list = List::new();
     list.append("Content-Type: application/json")

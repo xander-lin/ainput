@@ -7,11 +7,24 @@
 
 #include <fcntl.h>
 #include <unistd.h>
+#include <cerrno>
 #include <cstdio>
 #include <cstdlib>
 #include <stdexcept>
 
 namespace ainput {
+
+namespace {
+/// Status text shown for a stage. Kept here because the shell owns every
+/// user-visible string.
+const char *stageText(Stage stage) {
+    switch (stage) {
+    case Stage::Recognizing:
+        return "Ainput: recognizing...";
+    }
+    return "Ainput: ...";
+}
+} // namespace
 
 OutputHandler::OutputHandler(fcitx::Instance *instance) : instance_(instance) {
     if (pipe(wakePipe_) != 0) {
@@ -39,25 +52,56 @@ OutputHandler::~OutputHandler() {
     if (wakePipe_[1] >= 0) close(wakePipe_[1]);
 }
 
-void OutputHandler::submit(const OutputTarget &target, const std::string &text,
-                           std::function<void()> onCommitted) {
-    enqueue(target, text, false, std::move(onCommitted));
-}
-
-void OutputHandler::showStatus(const OutputTarget &target,
-                               const std::string &text,
-                               std::function<void()> onShown) {
-    enqueue(target, text, true, std::move(onShown));
-}
-
-OutputTarget OutputHandler::captureCurrentUuid(uint64_t recognitionId) {
-    OutputTarget target;
-    target.recognitionId = recognitionId;
-    target.statusSequence = ++latestStatusSequence_;
+void OutputHandler::rememberTarget(uint64_t recognitionId) {
+    // Event loop thread only.
+    fcitx::ICUUID uuid = {};
     if (auto *ic = instance_->mostRecentInputContext()) {
-        target.uuid = ic->uuid();
+        uuid = ic->uuid();
+    } else {
+        FCITX_INFO() << "Ainput: starting with no input context; the result "
+                        "will go to whatever is focused when it arrives";
     }
-    return target;
+    targets_[recognitionId] = uuid;
+    if (targets_.size() > 32) {
+        // Recordings are removed on delivery; this only guards against a lost
+        // completion. Drop the oldest entries.
+        targets_.erase(targets_.begin());
+    }
+}
+
+void OutputHandler::submit(uint64_t recognitionId, const std::string &text) {
+    Pending pending;
+    pending.text = text;
+    pending.isStatus = false;
+    pending.recognitionId = recognitionId;
+    enqueue(std::move(pending));
+}
+
+void OutputHandler::showStatus(uint64_t recognitionId, const std::string &text) {
+    Pending pending;
+    pending.text = text;
+    pending.isStatus = true;
+    pending.recognitionId = recognitionId;
+    {
+        std::lock_guard<std::mutex> lock(pendingMutex_);
+        pending.sequence = ++latestStatusSequence_;
+    }
+    enqueue(std::move(pending));
+}
+
+void OutputHandler::showStage(uint64_t recognitionId, Stage stage) {
+    showStatus(recognitionId, stageText(stage));
+}
+
+void OutputHandler::showGlobalStatus(const std::string &text) {
+    Pending pending;
+    pending.text = text;
+    pending.isStatus = true;
+    {
+        std::lock_guard<std::mutex> lock(pendingMutex_);
+        pending.sequence = ++latestStatusSequence_;
+    }
+    enqueue(std::move(pending));
 }
 
 void OutputHandler::wake() {
@@ -65,16 +109,23 @@ void OutputHandler::wake() {
     while (write(wakePipe_[1], &c, 1) < 0 && errno == EINTR) {}
 }
 
-void OutputHandler::enqueue(const OutputTarget &target, const std::string &text,
-                            bool isStatus,
-                            std::function<void()> completion) {
+void OutputHandler::enqueue(Pending pending) {
     {
-        std::lock_guard<std::mutex> lk(pendingMutex_);
-        pending_.push_back({text, isStatus, target.uuid,
-                            target.statusSequence, target.recognitionId,
-                            std::move(completion)});
+        std::lock_guard<std::mutex> lock(pendingMutex_);
+        pending_.push_back(std::move(pending));
     }
     wake();
+}
+
+fcitx::ICUUID OutputHandler::resolve(const Pending &pending) {
+    auto it = targets_.find(pending.recognitionId);
+    if (it != targets_.end()) {
+        return it->second;
+    }
+    if (auto *ic = instance_->mostRecentInputContext()) {
+        return ic->uuid();
+    }
+    return {};
 }
 
 void OutputHandler::drainAndCommit() {
@@ -83,40 +134,60 @@ void OutputHandler::drainAndCommit() {
 
     std::vector<Pending> batch;
     {
-        std::lock_guard<std::mutex> lk(pendingMutex_);
+        std::lock_guard<std::mutex> lock(pendingMutex_);
         batch.swap(pending_);
     }
 
-    // Status belongs in the input panel, never in the application's document.
-    for (auto &p : batch) {
-        if (p.isStatus) {
-            if (p.statusSequence < latestStatusSequence_) {
-                if (p.completion) p.completion();
+    for (auto &pending : batch) {
+        if (pending.isStatus) {
+            if (pending.sequence < latestStatusSequence_) {
+                if (pending.completion) pending.completion();
                 continue;
             }
-            auto *ic = instance_->inputContextManager().findByUUID(p.targetUuid);
-            if (ic) {
-                ic->inputPanel().setAuxUp(fcitx::Text(p.text));
-                ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
-            } else {
-            }
-            if (p.completion) p.completion();
+            showStatusNow(resolve(pending), pending.text, pending.sequence);
+            if (pending.completion) pending.completion();
         } else {
-            commitPending(std::move(p), "commit");
+            commitPending(std::move(pending));
         }
     }
 }
 
-void OutputHandler::commitPending(Pending pending, const char *label) {
-    auto *ic = instance_->inputContextManager().findByUUID(pending.targetUuid);
+void OutputHandler::showStatusNow(const fcitx::ICUUID &uuid,
+                                  const std::string &text, uint64_t sequence) {
+    auto *ic = instance_->inputContextManager().findByUUID(uuid);
     if (!ic) {
-        FCITX_INFO() << "Ainput [" << label << "] no focused ic, drop";
-    } else {
-        FCITX_INFO() << "Ainput [" << label << "] ic=" << ic
-                     << " program=" << ic->program()
-                     << " text_len=" << pending.text.size();
-        if (!pending.text.empty()) ic->commitString(pending.text);
+        if (!text.empty()) {
+            FCITX_INFO() << "Ainput [status] no input context for \"" << text
+                         << "\"; not shown";
+        }
+        return;
     }
+    (void)sequence;
+    ic->inputPanel().setAuxUp(fcitx::Text(text));
+    ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
+}
+
+void OutputHandler::commitPending(Pending pending) {
+    // The result is final: drop the recording's target and clear the status
+    // line. Leaving "processing audio..." in the panel after the text landed
+    // is a silent stall from the user's point of view.
+    targets_.erase(pending.recognitionId);
+
+    auto *ic = instance_->inputContextManager().findByUUID(resolve(pending));
+    if (!ic) {
+        FCITX_INFO() << "Ainput [commit] no focused ic, drop text_len="
+                     << pending.text.size();
+        if (pending.completion) pending.completion();
+        return;
+    }
+
+    FCITX_INFO() << "Ainput [commit] ic=" << ic << " program=" << ic->program()
+                 << " text_len=" << pending.text.size();
+    ic->inputPanel().setAuxUp(fcitx::Text(""));
+    if (!pending.text.empty()) {
+        ic->commitString(pending.text);
+    }
+    ic->updateUserInterface(fcitx::UserInterfaceComponent::InputPanel);
     if (pending.completion) pending.completion();
 }
 

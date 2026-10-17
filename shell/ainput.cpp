@@ -44,6 +44,7 @@
 
 #include "ainput_core.h"
 #include "output_handler.h"
+#include "periodic.h"
 
 using Clock = std::chrono::steady_clock;
 
@@ -85,9 +86,9 @@ struct DoubleMarshaller {
 
 namespace {
 
-/// A recording that never sees a release event is force-stopped after this
-/// long, so a dropped key event cannot leave the addon stuck in "listening".
-constexpr auto kMaxRecordingTime = std::chrono::seconds(120);
+/// How often the stale-state checks run. The recording limit itself is
+/// configurable (`MaxRecordingSec`).
+constexpr uint64_t kWATCHDOG_US = 1'000'000;
 /// Idle time after which a stale key debounce counter is cleared, so one lost
 /// synthetic event cannot swallow every later CapsLock press.
 constexpr auto kDebounceIdleReset = std::chrono::seconds(10);
@@ -111,6 +112,14 @@ FCITX_CONFIGURATION(
         this, "NotificationTimeout",
         "How long the Ctrl+CapsLock switch notification stays on screen (ms)",
         2000, fcitx::IntConstrain(200, 20000)};
+    // Safety net: a recording whose release event was lost (compositor
+    // hiccup, focus change, uinput replay) is stopped after this long. 0
+    // disables it. Visible in the dialog because "my microphone recorded for
+    // two minutes" is exactly the kind of thing a user wants to bound.
+    fcitx::Option<int, fcitx::IntConstrain> maxRecordingSec{
+        this, "MaxRecordingSec",
+        "Force-stop a recording after this long, in seconds (0 disables)", 120,
+        fcitx::IntConstrain(0, 3600)};
     // Exposed in the config file but hidden from the settings dialog: the
     // default (20 ms, four times the measured hardware floor) is right for
     // almost everyone. Raise it only on a device that clips the end of a
@@ -171,6 +180,7 @@ public:
         callbacks.user = this;
         callbacks.on_text = &AinputAddon::onTextThunk;
         callbacks.on_error = &AinputAddon::onErrorThunk;
+        callbacks.on_stage = &AinputAddon::onStageThunk;
         engine_ = ainput_engine_new(&callbacks);
 
         output_ = std::make_unique<ainput::OutputHandler>(instance_);
@@ -186,10 +196,17 @@ public:
                 onKeyEvent(static_cast<fcitx::KeyEvent &>(event));
             });
 
+        // fcitx5 time sources are ONESHOT: returning true keeps them alive but
+        // does not reschedule them, so the interval must be set explicitly.
+        // Without the rearm this fired once a second after startup and then
+        // never again, silently disabling both stale-state checks.
+        lastWatchdog_ = Clock::now();
         watchdog_ = instance_->eventLoop().addTimeEvent(
-            CLOCK_MONOTONIC, fcitx::now(CLOCK_MONOTONIC) + 1000000, 0,
-            [this](fcitx::EventSourceTime *, uint64_t) {
+            CLOCK_MONOTONIC, fcitx::now(CLOCK_MONOTONIC) + kWATCHDOG_US,
+            kWATCHDOG_US,
+            [this](fcitx::EventSourceTime *source, uint64_t) {
                 checkStaleState();
+                rearmPeriodic(source, kWATCHDOG_US);
                 return true;
             });
 
@@ -237,29 +254,24 @@ private:
                              const char *detail) {
         static_cast<AinputAddon *>(user)->onError(id, category, detail);
     }
-
-    ainput::OutputTarget takeTarget(uint64_t id) {
-        std::lock_guard<std::mutex> lock(targetMutex_);
-        auto it = targets_.find(id);
-        if (it != targets_.end()) {
-            auto target = it->second;
-            targets_.erase(it);
-            return target;
-        }
-        // Queue-full and startup errors arrive without a recording id; deliver
-        // them to whatever is focused now.
-        return output_->captureCurrentUuid(id);
+    static void onStageThunk(void *user, uint64_t id, int32_t stage) {
+        static_cast<AinputAddon *>(user)->onStage(id, stage);
     }
 
+    // These run on a Rust thread. They must not touch fcitx5: everything is
+    // handed to OutputHandler, which resolves contexts on the event loop.
     void onText(uint64_t id, const char *text) {
-        auto target = takeTarget(id);
-        output_->submit(target, text ? text : "");
+        output_->submit(id, text ? text : "");
     }
 
     void onError(uint64_t id, int32_t category, const char *detail) {
-        const std::string message = statusForError(category, detail ? detail : "");
-        auto target = takeTarget(id);
-        output_->showStatus(target, message);
+        output_->showStatus(id, statusForError(category, detail ? detail : ""));
+    }
+
+    void onStage(uint64_t id, int32_t stage) {
+        if (stage == AINPUT_STAGE_RECOGNIZING) {
+            output_->showStage(id, ainput::Stage::Recognizing);
+        }
     }
 
     static std::string statusForError(int32_t category, const std::string &detail) {
@@ -314,6 +326,7 @@ private:
         settings.provider = provider.c_str();
         settings.activation_msec = config_.activationMsec.value();
         settings.notification_timeout = config_.notificationTimeout.value();
+        settings.max_recording_sec = config_.maxRecordingSec.value();
         settings.buffer_ms = config_.bufferMs.value();
         settings.denoise = denoiseToInt(config_.denoise.value());
         settings.lufs_target = config_.lufsTarget.value();
@@ -363,8 +376,7 @@ private:
         // overwriting whatever the user changed in the config UI since.
         renameLegacyConfig();
         FCITX_WARN() << "Ainput: " << report;
-        output_->showStatus(output_->captureCurrentUuid(0),
-                            "Ainput: settings migrated to fcitx5 configuration");
+        output_->showGlobalStatus("Ainput: settings migrated to fcitx5 configuration");
     }
 
     void renameLegacyConfig() {
@@ -400,8 +412,7 @@ private:
         char message[512] = {0};
         ainput_uinput_error(message, sizeof(message));
         FCITX_WARN() << "Ainput: " << message;
-        output_->showStatus(output_->captureCurrentUuid(0),
-                            "Ainput: CapsLock restore disabled (see log)");
+        output_->showGlobalStatus("Ainput: CapsLock restore disabled (see log)");
     }
 
     // ---- providers ----
@@ -608,27 +619,17 @@ private:
         }
 
         activeId_ = ainput_engine_start(engine_);
-        FCITX_INFO() << "Ainput: recording started, id=" << activeId_;
         if (activeId_ == 0) {
+            FCITX_INFO() << "Ainput: recording did not start";
             return;
         }
+        FCITX_INFO() << "Ainput: recording started, id=" << activeId_;
 
-        {
-            std::lock_guard<std::mutex> lock(targetMutex_);
-            targets_[activeId_] = output_->captureCurrentUuid(activeId_);
-        }
+        // Event loop thread: safe to ask fcitx5 which context is focused.
+        output_->rememberTarget(activeId_);
         active_ = true;
         activeSince_ = Clock::now();
-        output_->showStatus(targetFor(activeId_), "Ainput: listening...");
-    }
-
-    ainput::OutputTarget targetFor(uint64_t id) {
-        std::lock_guard<std::mutex> lock(targetMutex_);
-        auto it = targets_.find(id);
-        if (it != targets_.end()) {
-            return it->second;
-        }
-        return output_->captureCurrentUuid(id);
+        output_->showStatus(activeId_, "Ainput: listening...");
     }
 
     void deactivate() {
@@ -638,18 +639,22 @@ private:
         const auto id = activeId_;
         active_ = false;
         activeId_ = 0;
-        output_->showStatus(targetFor(id), "Ainput: processing audio...");
+        output_->showStatus(id, "Ainput: processing audio...");
         ainput_engine_stop(engine_, id);
         revertDebounce_ = kRestoreDebounceEvents;
     }
 
     /// Recovers from a dropped key event: a recording that outlived
-    /// kMaxRecordingTime is stopped, and a debounce counter that has had no
+    /// `MaxRecordingSec` is stopped, and a debounce counter that has had no
     /// CapsLock traffic for kDebounceIdleReset is cleared.
     void checkStaleState() {
-        const auto now = Clock::now();
-        if (active_ && now - activeSince_ > kMaxRecordingTime) {
-            FCITX_WARN() << "Ainput: recording exceeded the time limit, stopping";
+        lastWatchdog_ = Clock::now();
+        const auto now = lastWatchdog_;
+        const int limitSec = config_.maxRecordingSec.value();
+        if (active_ && limitSec > 0 &&
+            now - activeSince_ > std::chrono::seconds(limitSec)) {
+            FCITX_WARN() << "Ainput: recording exceeded " << limitSec
+                         << " s, force-stopping (release event lost?)";
             deactivate();
         }
         if (revertDebounce_ > 0 && now - lastCapsEvent_ > kDebounceIdleReset) {
@@ -666,9 +671,8 @@ private:
     std::unique_ptr<fcitx::EventSourceTime> watchdog_;
     std::unique_ptr<fcitx::EventSourceTime> timer_;
 
-    std::mutex targetMutex_;
-    std::unordered_map<uint64_t, ainput::OutputTarget> targets_;
-
+    Clock::time_point lastWatchdog_{};
+    bool watchdogWarned_ = false;
     bool active_ = false;
     bool switchActive_ = false;
     uint64_t activeId_ = 0;

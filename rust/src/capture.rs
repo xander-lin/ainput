@@ -11,7 +11,6 @@
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -67,6 +66,14 @@ impl Recording {
         self.stop.store(true, Ordering::Relaxed);
     }
 
+    /// True once preprocessing and the WAV write are done.
+    pub fn is_finished(&mut self) -> bool {
+        match self.thread.as_ref() {
+            Some(handle) => handle.is_finished(),
+            None => true,
+        }
+    }
+
     /// Waits for the capture thread. Used at shutdown only.
     pub fn join(&mut self) {
         if let Some(handle) = self.thread.take() {
@@ -75,45 +82,47 @@ impl Recording {
     }
 }
 
+/// Per-user private directory for the intermediate WAV.
+///
+/// The recording is a plaintext copy of whatever the user said until the
+/// provider returns, so it must not land in a world-readable shared /tmp with
+/// a predictable name.
 fn wav_path_for(recognition_id: u64) -> PathBuf {
-    std::env::temp_dir().join(format!(
-        "ainput_cap_{}_{}.wav",
-        std::process::id(),
-        recognition_id
-    ))
+    let dir = std::env::temp_dir().join(format!("ainput-{}", unsafe {
+        libc::geteuid()
+    }));
+    let path = dir.join(format!("cap_{}.wav", recognition_id));
+    // The directory is created here rather than relying on wav::write, and
+    // 0700 is set unconditionally so a pre-existing directory cannot widen it.
+    if std::fs::create_dir_all(&dir).is_ok() {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700));
+    }
+    path
 }
 
-/// Starts recording. Blocks until PulseAudio is ready or `READY_TIMEOUT`.
+/// Starts recording without waiting for PulseAudio.
+///
+/// Waiting for READY here used to block the fcitx5 event loop for 40-50 ms on
+/// every activation, during which no key was processed. Readiness and any
+/// setup failure are now reported through `on_done` instead, which is the same
+/// path a mid-recording failure takes.
 pub fn spawn<F>(recognition_id: u64, settings: Settings, on_done: F) -> Result<Recording>
 where
     F: FnOnce(u64, std::result::Result<Captured, Error>) + Send + 'static,
 {
     let stop = Arc::new(AtomicBool::new(false));
     let stop_flag = stop.clone();
-    let (ready_tx, ready_rx) = mpsc::channel::<std::result::Result<(), Error>>();
 
     let handle = thread::Builder::new()
         .name(format!("ainput-capture-{recognition_id}"))
-        .spawn(move || run_capture(recognition_id, settings, stop_flag, ready_tx, on_done))
+        .spawn(move || run_capture(recognition_id, settings, stop_flag, on_done))
         .map_err(|e| Error::runtime(format!("cannot start capture thread: {e}")))?;
 
-    match ready_rx.recv_timeout(READY_TIMEOUT) {
-        Ok(Ok(())) => Ok(Recording {
-            stop,
-            thread: Some(handle),
-        }),
-        Ok(Err(error)) => {
-            let _ = handle.join();
-            Err(error)
-        }
-        Err(_) => {
-            stop.store(true, Ordering::Relaxed);
-            let _ = handle.join();
-            Err(Error::audio_data(
-                "PulseAudio did not become ready within 3 s",
-            ))
-        }
-    }
+    Ok(Recording {
+        stop,
+        thread: Some(handle),
+    })
 }
 
 fn sample_spec() -> pulse::sample::Spec {
@@ -146,7 +155,7 @@ fn drain(stream: &mut pulse::stream::Stream, samples: &mut Vec<i16>) {
             }
             Ok(pulse::stream::PeekResult::Hole(bytes)) => {
                 // A hole is silence, not missing audio.
-                samples.extend(std::iter::repeat(0i16).take(bytes / 2));
+                samples.extend(std::iter::repeat_n(0i16, bytes / 2));
                 if stream.discard().is_err() {
                     return;
                 }
@@ -161,7 +170,6 @@ fn run_capture<F>(
     recognition_id: u64,
     settings: Settings,
     stop: Arc<AtomicBool>,
-    ready: mpsc::Sender<std::result::Result<(), Error>>,
     on_done: F,
 ) where
     F: FnOnce(u64, std::result::Result<Captured, Error>),
@@ -172,7 +180,10 @@ fn run_capture<F>(
     let mut mainloop = match Mainloop::new() {
         Some(mainloop) => mainloop,
         None => {
-            let _ = ready.send(Err(Error::audio_data("cannot create PulseAudio main loop")));
+            on_done(
+                recognition_id,
+                Err(Error::audio_data("cannot create PulseAudio main loop")),
+            );
             return;
         }
     };
@@ -180,15 +191,21 @@ fn run_capture<F>(
     let mut context = match pulse::context::Context::new(&mainloop, "ainput") {
         Some(context) => context,
         None => {
-            let _ = ready.send(Err(Error::audio_data("cannot create PulseAudio context")));
+            on_done(
+                recognition_id,
+                Err(Error::audio_data("cannot create PulseAudio context")),
+            );
             return;
         }
     };
 
     if let Err(err) = context.connect(None, pulse::context::FlagSet::NOFLAGS, None) {
-        let _ = ready.send(Err(Error::audio_data(format!(
-            "cannot connect to PulseAudio: {err}"
-        ))));
+        on_done(
+            recognition_id,
+            Err(Error::audio_data(format!(
+                "cannot connect to PulseAudio: {err}"
+            ))),
+        );
         return;
     }
 
@@ -197,21 +214,25 @@ fn run_capture<F>(
             ContextState::Ready => break,
             ContextState::Failed | ContextState::Terminated => {
                 let err = context.errno();
-                let _ = ready.send(Err(Error::audio_data(format!(
-                    "PulseAudio context failed: {err}"
-                ))));
+                on_done(
+                    recognition_id,
+                    Err(Error::audio_data(format!(
+                        "PulseAudio context failed: {err}"
+                    ))),
+                );
                 return;
             }
             _ => {}
         }
         if started.elapsed() > READY_TIMEOUT {
-            let _ = ready.send(Err(Error::audio_data(
-                "PulseAudio context did not become ready",
-            )));
+            on_done(
+                recognition_id,
+                Err(Error::audio_data("PulseAudio context did not become ready")),
+            );
             return;
         }
         if let Err(error) = iterate(&mut mainloop, false) {
-            let _ = ready.send(Err(error));
+            on_done(recognition_id, Err(error));
             return;
         }
         thread::sleep(POLL_INTERVAL);
@@ -221,7 +242,10 @@ fn run_capture<F>(
     let mut stream = match pulse::stream::Stream::new(&mut context, "voice", &spec, None) {
         Some(stream) => stream,
         None => {
-            let _ = ready.send(Err(Error::audio_data("cannot create PulseAudio stream")));
+            on_done(
+                recognition_id,
+                Err(Error::audio_data("cannot create PulseAudio stream")),
+            );
             return;
         }
     };
@@ -248,9 +272,10 @@ fn run_capture<F>(
         Some(&attr),
         pulse::stream::FlagSet::ADJUST_LATENCY,
     ) {
-        let _ = ready.send(Err(Error::audio_data(format!(
-            "cannot open microphone: {err}"
-        ))));
+        on_done(
+            recognition_id,
+            Err(Error::audio_data(format!("cannot open microphone: {err}"))),
+        );
         return;
     }
 
@@ -259,27 +284,30 @@ fn run_capture<F>(
             StreamState::Ready => break,
             StreamState::Failed | StreamState::Terminated => {
                 let err = context.errno();
-                let _ = ready.send(Err(Error::audio_data(format!(
-                    "PulseAudio stream failed: {err}"
-                ))));
+                on_done(
+                    recognition_id,
+                    Err(Error::audio_data(format!(
+                        "PulseAudio stream failed: {err}"
+                    ))),
+                );
                 return;
             }
             _ => {}
         }
         if started.elapsed() > READY_TIMEOUT {
-            let _ = ready.send(Err(Error::audio_data(
-                "PulseAudio stream did not become ready",
-            )));
+            on_done(
+                recognition_id,
+                Err(Error::audio_data("PulseAudio stream did not become ready")),
+            );
             return;
         }
         if let Err(error) = iterate(&mut mainloop, false) {
-            let _ = ready.send(Err(error));
+            on_done(recognition_id, Err(error));
             return;
         }
         thread::sleep(POLL_INTERVAL);
     }
 
-    let _ = ready.send(Ok(()));
     diagnostic::event(
         "audio",
         "capture_started",
@@ -300,15 +328,18 @@ fn run_capture<F>(
         thread::sleep(POLL_INTERVAL);
     }
 
-    // Keep whatever the server already handed over, so the final syllable is
-    // not clipped by an immediate disconnect.
-    let drain_deadline = Instant::now() + TAIL_DRAIN;
-    while Instant::now() < drain_deadline {
-        let _ = iterate(&mut mainloop, false);
-        let empty_before = matches!(stream.peek(), Ok(pulse::stream::PeekResult::Empty));
-        drain(&mut stream, &mut samples);
-        if empty_before {
-            thread::sleep(Duration::from_millis(5));
+    if TAIL_DRAIN > Duration::ZERO {
+        // Nothing is in flight at stop on the systems we measured, so this
+        // branch is off. It exists only so a future device that does buffer
+        // can be tested without rewriting the loop.
+        let drain_deadline = Instant::now() + TAIL_DRAIN;
+        while Instant::now() < drain_deadline {
+            let _ = iterate(&mut mainloop, false);
+            let empty_before = matches!(stream.peek(), Ok(pulse::stream::PeekResult::Empty));
+            drain(&mut stream, &mut samples);
+            if empty_before {
+                thread::sleep(Duration::from_millis(5));
+            }
         }
     }
 

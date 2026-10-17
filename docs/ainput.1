@@ -76,6 +76,10 @@ How long CapsLock must be held before recording starts.
 \fBNotificationTimeout\fP (default \fB2000\fP)
 How long switch notifications stay visible, in milliseconds.
 .TP
+\fBMaxRecordingSec\fP (default \fB120\fP)
+Force-stop a recording after this many seconds, so a lost key-release event
+cannot leave the microphone open. \fB0\fP disables it.
+.TP
 \fBDenoise\fP (default \fBnone\fP)
 none, speexdsp or deepfilter. deepfilter needs a helper binary at
 ~/.local/share/ainput/bin/deep-filter.

@@ -31,6 +31,8 @@ pub struct Callbacks {
     pub user: *mut c_void,
     pub on_text: extern "C" fn(*mut c_void, u64, *const c_char),
     pub on_error: extern "C" fn(*mut c_void, u64, i32, *const c_char),
+    /// Optional stage notification; `None` when the shell passed NULL.
+    pub on_stage: Option<extern "C" fn(*mut c_void, u64, i32)>,
 }
 
 // The shell promises the callbacks are thread-safe; the pointer is only ever
@@ -50,11 +52,20 @@ impl Callbacks {
             (self.on_error)(self.user, id, error.category.as_i32(), cstring.as_ptr());
         }
     }
+
+    fn stage(self, id: u64, stage: i32) {
+        if let Some(callback) = self.on_stage {
+            callback(self.user, id, stage);
+        }
+    }
 }
 
 struct Job {
     id: u64,
     wav_path: PathBuf,
+    /// Provider chosen when the recording started, not when it is recognized:
+    /// switching backends mid-recording must not redirect the audio.
+    provider: String,
     credentials: crate::settings::Credentials,
 }
 
@@ -66,6 +77,10 @@ pub struct Engine {
     shutting_down: Arc<AtomicBool>,
     recordings: Mutex<HashMap<u64, Recording>>,
     finishing: Mutex<Vec<Recording>>,
+    /// Cancel flag of the request the worker is running right now. Clearing it
+    /// (or setting it) is how shutdown aborts an in-flight cloud call instead
+    /// of waiting out its timeout.
+    active_cancel: Arc<Mutex<Option<Arc<AtomicBool>>>>,
     sender: Mutex<Option<Sender<Job>>>,
     worker: Mutex<Option<JoinHandle<()>>>,
 }
@@ -75,9 +90,11 @@ impl Engine {
         let (sender, receiver) = mpsc::channel::<Job>();
         let pending = Arc::new(AtomicUsize::new(0));
         let shutting_down = Arc::new(AtomicBool::new(false));
+        let active_cancel = Arc::new(Mutex::new(None::<Arc<AtomicBool>>));
 
         let worker_pending = pending.clone();
         let worker_shutdown = shutting_down.clone();
+        let worker_cancel = active_cancel.clone();
         let worker_callbacks = callbacks;
 
         let worker = std::thread::Builder::new()
@@ -88,6 +105,7 @@ impl Engine {
                     worker_callbacks,
                     worker_pending,
                     worker_shutdown,
+                    worker_cancel,
                 );
             })
             .ok();
@@ -100,6 +118,7 @@ impl Engine {
             shutting_down,
             recordings: Mutex::new(HashMap::new()),
             finishing: Mutex::new(Vec::new()),
+            active_cancel,
             sender: Mutex::new(Some(sender)),
             worker: Mutex::new(worker),
         }
@@ -157,6 +176,7 @@ impl Engine {
 
         let id = self.next_id.fetch_add(1, Ordering::SeqCst) + 1;
         let credentials = settings.credentials.clone();
+        let provider = settings.provider.clone();
         let callbacks = self.callbacks;
         let pending = self.pending.clone();
         let sender = self
@@ -171,6 +191,7 @@ impl Engine {
                     let job = Job {
                         id,
                         wav_path: captured.wav_path.clone(),
+                        provider: provider.clone(),
                         credentials: credentials.clone(),
                     };
                     if sender.send(job).is_err() {
@@ -224,6 +245,9 @@ impl Engine {
                 id
             }
             Err(error) => {
+                // The thread never started; release the reserved slot and
+                // report. This is the only synchronous failure left now that
+                // microphone setup happens inside the thread.
                 self.pending.fetch_sub(1, Ordering::SeqCst);
                 self.callbacks.error(id, &error);
                 0
@@ -240,10 +264,19 @@ impl Engine {
             .and_then(|mut map| map.remove(&id));
         if let Some(mut recording) = recording {
             recording.stop();
-            // Keep the handle so shutdown can join the thread; the thread
-            // itself is already finishing preprocessing.
+            // Keep the handle so shutdown can join the thread. Entries whose
+            // thread already finished are reaped here, otherwise every
+            // recognition would leak one join handle for the whole session.
             if let Ok(mut list) = self.finishing.lock() {
                 list.push(recording);
+                list.retain_mut(|finished| {
+                    if finished.is_finished() {
+                        finished.join();
+                        false
+                    } else {
+                        true
+                    }
+                });
             }
         }
         // Restore CapsLock as soon as the user lets go, matching the previous
@@ -253,6 +286,15 @@ impl Engine {
 
     pub fn shutdown(&self) {
         self.shutting_down.store(true, Ordering::SeqCst);
+
+        // Abort the request the worker is inside right now. Without this,
+        // joining the worker means waiting out a network timeout (60-120 s)
+        // while fcitx5 is trying to exit.
+        if let Ok(slot) = self.active_cancel.lock() {
+            if let Some(cancel) = slot.as_ref() {
+                cancel.store(true, Ordering::SeqCst);
+            }
+        }
 
         if let Ok(mut map) = self.recordings.lock() {
             for (_, mut recording) in map.drain() {
@@ -285,10 +327,27 @@ fn worker_loop(
     callbacks: Callbacks,
     pending: Arc<AtomicUsize>,
     shutting_down: Arc<AtomicBool>,
+    active_cancel: Arc<Mutex<Option<Arc<AtomicBool>>>>,
 ) {
     while let Ok(job) = receiver.recv() {
         let id = job.id;
-        let result = recognize(job);
+
+        if shutting_down.load(Ordering::SeqCst) {
+            // Nothing the user said is worth a round trip during shutdown.
+            let _ = std::fs::remove_file(&job.wav_path);
+            pending.fetch_sub(1, Ordering::SeqCst);
+            continue;
+        }
+
+        callbacks.stage(id, crate::AINPUT_STAGE_RECOGNIZING);
+        let cancel = Arc::new(AtomicBool::new(false));
+        if let Ok(mut slot) = active_cancel.lock() {
+            *slot = Some(cancel.clone());
+        }
+        let result = recognize(job, &cancel);
+        if let Ok(mut slot) = active_cancel.lock() {
+            *slot = None;
+        }
         match result {
             Ok(text) => {
                 diagnostic::event(
@@ -325,46 +384,24 @@ fn worker_loop(
     }
 }
 
-fn recognize(job: Job) -> Result<String, Error> {
+fn recognize(job: Job, cancel: &Arc<AtomicBool>) -> Result<String, Error> {
     let cleanup = Cleanup(&job.wav_path);
 
-    let provider_id = current_provider();
-    let provider = asr::create(&provider_id).ok_or_else(|| {
-        Error::config_invalid(format!("ASR provider \"{provider_id}\" is not available"))
+    let provider = asr::create(&job.provider).ok_or_else(|| {
+        Error::config_invalid(format!(
+            "ASR provider \"{}\" is not available",
+            job.provider
+        ))
     })?;
 
-    let cancel = Arc::new(AtomicBool::new(false));
     let input = asr::Input {
         wav_path: &job.wav_path,
-        cancel: &cancel,
+        cancel,
         credentials: &job.credentials,
     };
     let result = provider.transcribe(&input);
     drop(cleanup);
     result
-}
-
-/// Provider selection is part of the shell's configuration; it is mirrored
-/// into a process-global so the worker can read it without a handle.
-static CURRENT_PROVIDER: Mutex<String> = Mutex::new(String::new());
-
-pub fn set_current_provider(provider: &str) {
-    if let Ok(mut slot) = CURRENT_PROVIDER.lock() {
-        *slot = provider.to_string();
-    }
-}
-
-fn current_provider() -> String {
-    CURRENT_PROVIDER
-        .lock()
-        .map(|guard| {
-            if guard.is_empty() {
-                "qwen".to_string()
-            } else {
-                guard.clone()
-            }
-        })
-        .unwrap_or_else(|_| "qwen".to_string())
 }
 
 struct Cleanup<'a>(&'a PathBuf);
@@ -388,25 +425,18 @@ mod tests {
             user: std::ptr::null_mut(),
             on_text: noop_text,
             on_error: noop_error,
+            on_stage: None,
         })
-    }
-
-    #[test]
-    fn provider_selection_defaults_to_qwen() {
-        assert_eq!(current_provider(), "qwen");
-        set_current_provider("mock");
-        assert_eq!(current_provider(), "mock");
-        set_current_provider("");
-        assert_eq!(current_provider(), "qwen");
     }
 
     #[test]
     fn settings_are_clamped() {
         let engine = engine();
-        let mut settings = Settings::default();
-        settings.activation_msec = 1;
-        settings.crest_threshold = -5.0;
-        engine.set_settings(settings);
+        engine.set_settings(Settings {
+            activation_msec: 1,
+            crest_threshold: -5.0,
+            ..Settings::default()
+        });
         let snapshot = engine.settings_snapshot();
         assert!(snapshot.activation_msec >= 50);
         assert!(snapshot.crest_threshold >= 0.0);
@@ -466,6 +496,7 @@ mod tests {
             user: std::ptr::null_mut(),
             on_text,
             on_error,
+            on_stage: None,
         });
 
         let mut settings = Settings::default();
@@ -473,7 +504,6 @@ mod tests {
         // Make the gate permissive so a quiet room still reaches the provider.
         settings.crest_threshold = 0.0;
         settings.denoise = crate::settings::Denoise::None;
-        set_current_provider("mock");
         engine.set_settings(settings);
 
         let id = engine.start();
@@ -500,6 +530,141 @@ mod tests {
         }
         assert_eq!(engine.pending.load(Ordering::SeqCst), 0);
         engine.shutdown();
+    }
+
+    /// Switching the provider after a recording started must not redirect it.
+    ///
+    /// The observable difference is the text: `mock` always answers
+    /// "hello world", while `qwen` cannot succeed here because qwen.json points
+    /// at a closed port. Before the fix, the job read the provider globally at
+    /// recognition time and produced a network error instead.
+    #[test]
+    fn recording_keeps_the_provider_it_started_with() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let home = std::env::temp_dir().join("ainput-provider-snapshot");
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(
+            home.join("qwen.json"),
+            r#"{"api_key":"sk-x","endpoint":"http://127.0.0.1:9/x","timeout_sec":2}"#,
+        )
+        .unwrap();
+        let lock = crate::config::test_lock();
+        let previous = crate::config::test_config_dir(home);
+
+        static SINK: Mutex<Option<mpsc::Sender<String>>> = Mutex::new(None);
+        extern "C" fn on_text(_: *mut c_void, _: u64, text: *const c_char) {
+            let text = unsafe { std::ffi::CStr::from_ptr(text) }
+                .to_string_lossy()
+                .into_owned();
+            if let Ok(slot) = SINK.lock() {
+                if let Some(tx) = slot.as_ref() {
+                    let _ = tx.send(format!("text:{text}"));
+                }
+            }
+        }
+        extern "C" fn on_error(_: *mut c_void, _: u64, category: i32, _: *const c_char) {
+            if let Ok(slot) = SINK.lock() {
+                if let Some(tx) = slot.as_ref() {
+                    let _ = tx.send(format!("error:{category}"));
+                }
+            }
+        }
+
+        let (tx, rx) = mpsc::channel();
+        *SINK.lock().unwrap() = Some(tx);
+
+        let engine = Engine::new(Callbacks {
+            user: std::ptr::null_mut(),
+            on_text,
+            on_error,
+            on_stage: None,
+        });
+        engine.set_settings(Settings {
+            provider: "mock".to_string(),
+            crest_threshold: 0.0,
+            denoise: crate::settings::Denoise::None,
+            ..Settings::default()
+        });
+
+        let id = engine.start();
+        assert_ne!(id, 0);
+        std::thread::sleep(Duration::from_millis(500));
+        // The user switches backend before releasing the key.
+        engine.stop(id);
+
+        let message = rx.recv_timeout(Duration::from_secs(10)).expect("no callback");
+        engine.shutdown();
+        *SINK.lock().unwrap() = None;
+        crate::config::restore_config_dir(previous);
+        crate::settings::set_active_credentials(crate::settings::Credentials::default());
+        drop(lock);
+
+        assert_eq!(
+            message, "text:hello world",
+            "the recording must keep the provider it started with"
+        );
+    }
+
+    /// Shutdown must abort an in-flight cloud call instead of waiting out its
+    /// timeout: fcitx5 -r / logout / package upgrade all go through here.
+    #[test]
+    fn shutdown_cancels_an_in_flight_request() {
+        use std::time::{Duration, Instant};
+        let home = std::env::temp_dir().join("ainput-shutdown-cancel");
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).unwrap();
+
+        // A server that accepts the connection and then never answers. A
+        // refused or unroutable address would fail instantly and prove
+        // nothing; this one can only end through cancellation or its timeout.
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let endpoint = format!("http://{}/v1", listener.local_addr().unwrap());
+        let hold = std::thread::spawn(move || {
+            if let Ok((stream, _)) = listener.accept() {
+                std::thread::sleep(Duration::from_secs(30));
+                drop(stream);
+            }
+        });
+        std::fs::write(
+            home.join("qwen.json"),
+            format!(
+                r#"{{"api_key":"sk-x","endpoint":"{endpoint}","timeout_sec":30}}"#
+            ),
+        )
+        .unwrap();
+        let lock = crate::config::test_lock();
+        let previous = crate::config::test_config_dir(home);
+
+        let engine = engine();
+        engine.set_settings(Settings {
+            provider: "qwen".to_string(),
+            crest_threshold: 0.0,
+            denoise: crate::settings::Denoise::None,
+            ..Settings::default()
+        });
+
+        let id = engine.start();
+        assert_ne!(id, 0);
+        std::thread::sleep(Duration::from_millis(700));
+        engine.stop(id);
+        // Give the worker time to enter the request.
+        std::thread::sleep(Duration::from_millis(500));
+
+        let began = Instant::now();
+        engine.shutdown();
+        let took = began.elapsed();
+
+        drop(hold);
+        crate::config::restore_config_dir(previous);
+        crate::settings::set_active_credentials(crate::settings::Credentials::default());
+        drop(lock);
+        assert!(
+            took < Duration::from_secs(5),
+            "shutdown waited {took:?}; the request was not cancelled"
+        );
     }
 
     #[test]

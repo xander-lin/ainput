@@ -2,6 +2,13 @@
 //!
 //! The shell owns every fcitx5 type; this crate only sees numbers, C strings
 //! and POD structs. See `shell/ainput_core.h` for the contract.
+//!
+//! Every entry point below takes raw pointers by definition, so the "public
+//! function dereferences a raw pointer but is not `unsafe`" lint is allowed
+//! crate-wide: marking the whole exported surface `unsafe fn` would just push
+//! the obligation to C, which cannot express it. The actual unsafety is
+//! confined to the `unsafe { }` blocks, each of which states its precondition.
+#![allow(clippy::not_unsafe_ptr_arg_deref)]
 
 mod asr;
 
@@ -30,12 +37,16 @@ use std::sync::Arc;
 use engine::{Callbacks, Engine};
 use settings::{Denoise, Settings};
 
+/// Mirrors `AINPUT_STAGE_*` in the C header.
+pub const AINPUT_STAGE_RECOGNIZING: i32 = 1;
+
 /// Mirrors `AinputCallbacks` in the C header.
 #[repr(C)]
 pub struct RawCallbacks {
     pub user: *mut c_void,
     pub on_text: extern "C" fn(*mut c_void, u64, *const c_char),
     pub on_error: extern "C" fn(*mut c_void, u64, i32, *const c_char),
+    pub on_stage: Option<extern "C" fn(*mut c_void, u64, i32)>,
 }
 
 /// Mirrors `AinputSettings` in the C header.
@@ -44,6 +55,7 @@ pub struct RawSettings {
     pub provider: *const c_char,
     pub activation_msec: i32,
     pub notification_timeout: i32,
+    pub max_recording_sec: i32,
     pub buffer_ms: i32,
     pub denoise: i32,
     pub lufs_target: f64,
@@ -97,6 +109,7 @@ pub extern "C" fn ainput_engine_new(callbacks: *const RawCallbacks) -> *mut Ainp
             user: raw.user,
             on_text: raw.on_text,
             on_error: raw.on_error,
+            on_stage: raw.on_stage,
         }
     };
 
@@ -146,6 +159,7 @@ pub extern "C" fn ainput_engine_set_settings(
         provider: provider.clone(),
         activation_msec: raw.activation_msec,
         notification_timeout: raw.notification_timeout,
+        max_recording_sec: raw.max_recording_sec,
         buffer_ms: raw.buffer_ms,
         denoise: Denoise::from_i32(raw.denoise),
         lufs_target: raw.lufs_target,
@@ -153,7 +167,6 @@ pub extern "C" fn ainput_engine_set_settings(
         crest_threshold: raw.crest_threshold,
         credentials,
     };
-    engine::set_current_provider(&provider);
     let handle = unsafe { &*engine };
     handle.engine.set_settings(settings);
 }
@@ -331,6 +344,7 @@ pub extern "C" fn ainput_migrate_legacy_config(
         (*out).provider = provider.as_ptr();
         (*out).activation_msec = settings.activation_msec;
         (*out).notification_timeout = settings.notification_timeout;
+        (*out).max_recording_sec = settings.max_recording_sec;
         (*out).denoise = match settings.denoise {
             Denoise::None => 0,
             Denoise::Speexdsp => 1,
