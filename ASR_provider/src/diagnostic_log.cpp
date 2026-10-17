@@ -15,7 +15,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-namespace vinput {
+namespace ainput {
 
 namespace {
 
@@ -78,16 +78,16 @@ std::string makeLine(std::string_view component, std::string_view name,
     return out.str();
 }
 
-#if VINPUT_DIAGNOSTICS_ENABLED
+#if AINPUT_DIAGNOSTICS_ENABLED
 std::string defaultPath() {
-    if (const char *overridePath = getenv("VINPUT_DIAGNOSTIC_LOG");
+    if (const char *overridePath = getenv("AINPUT_DIAGNOSTIC_LOG");
         overridePath && *overridePath) {
         return overridePath;
     }
     const char *home = getenv("HOME");
     if (home && *home)
-        return std::string(home) + "/.local/share/vinput/diagnostic.log";
-    return "/tmp/vinput-diagnostic.log";
+        return std::string(home) + "/.local/share/ainput/diagnostic.log";
+    return "/tmp/ainput-diagnostic.log";
 }
 #endif
 
@@ -169,7 +169,7 @@ std::vector<std::string> MemoryDiagnosticLog::lines() const {
 }
 
 std::unique_ptr<IDiagnosticLog> makeDiagnosticLog() {
-#if VINPUT_DIAGNOSTICS_ENABLED
+#if AINPUT_DIAGNOSTICS_ENABLED
     return std::make_unique<FileDiagnosticLog>(defaultPath());
 #else
     return std::make_unique<NullDiagnosticLog>();
@@ -181,4 +181,4 @@ IDiagnosticLog &diagnosticLog() {
     return *logger;
 }
 
-} // namespace vinput
+} // namespace ainput

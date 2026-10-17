@@ -15,7 +15,7 @@
 #include <cstring>
 #include <cerrno>
 
-namespace vinput {
+namespace ainput {
 namespace ws {
 
 inline std::string sendBinaryRecvText(int port, const uint8_t *wavData, size_t wavLen) {
@@ -74,7 +74,7 @@ inline std::string sendBinaryRecvText(int port, const uint8_t *wavData, size_t w
         "\r\n", port, keyB64);
 
     if (write(fd, req, (size_t)reqLen) != reqLen) {
-        fprintf(stderr, "Vinput ws: handshake write failed, errno=%d\n", errno);
+        fprintf(stderr, "Ainput ws: handshake write failed, errno=%d\n", errno);
         close(fd);
         throw std::runtime_error("ws handshake write failed");
     }
@@ -85,7 +85,7 @@ inline std::string sendBinaryRecvText(int port, const uint8_t *wavData, size_t w
     while (handshake.find("\r\n\r\n") == std::string::npos) {
         int n = (int)read(fd, resp, sizeof(resp) - 1);
         if (n <= 0) {
-            fprintf(stderr, "Vinput ws: handshake read returned %d, errno=%d (%s)\n",
+            fprintf(stderr, "Ainput ws: handshake read returned %d, errno=%d (%s)\n",
                     n, errno, strerror(errno));
             close(fd);
             throw std::runtime_error("ws handshake read failed");
@@ -94,7 +94,7 @@ inline std::string sendBinaryRecvText(int port, const uint8_t *wavData, size_t w
         handshake += resp;
     }
     if (!strstr(handshake.c_str(), "101")) {
-        fprintf(stderr, "Vinput ws: handshake response: %s\n", handshake.c_str());
+        fprintf(stderr, "Ainput ws: handshake response: %s\n", handshake.c_str());
         close(fd);
         throw std::runtime_error("ws handshake not 101");
     }
@@ -183,4 +183,4 @@ inline std::string sendBinaryRecvText(int port, const uint8_t *wavData, size_t w
 }
 
 } // namespace ws
-} // namespace vinput
+} // namespace ainput

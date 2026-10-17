@@ -58,35 +58,35 @@ const char *kLegacyResponse =
     "\"request_id\":\"legacy\",\"usage\":{\"input_tokens\":10}}";
 
 void testTextExtraction() {
-    checkEq(vinput::qwenExtractText(kNewGenWordsAfterText),
+    checkEq(ainput::qwenExtractText(kNewGenWordsAfterText),
             "Hello World，这里是阿里巴巴语音实验室。",
             "new-gen text with words after text");
-    checkEq(vinput::qwenExtractText(kNewGenWordsBeforeText), "你好世界",
+    checkEq(ainput::qwenExtractText(kNewGenWordsBeforeText), "你好世界",
             "new-gen text with words before text");
-    checkEq(vinput::qwenExtractText(kNewGenDiarization), "第一句第二句",
+    checkEq(ainput::qwenExtractText(kNewGenDiarization), "第一句第二句",
             "new-gen diarization output.text wins");
-    checkEq(vinput::qwenExtractText(kLegacyResponse), "识别出的文本内容",
+    checkEq(ainput::qwenExtractText(kLegacyResponse), "识别出的文本内容",
             "legacy choices/content text");
-    checkEq(vinput::qwenExtractText("{\"output\":{\"text\":\"普通话\"}}"),
+    checkEq(ainput::qwenExtractText("{\"output\":{\"text\":\"普通话\"}}"),
             "普通话", "minimal new-gen response");
-    checkEq(vinput::qwenExtractText(""), "", "empty body yields no text");
-    checkEq(vinput::qwenExtractText("{\"output\":{}}"), "",
+    checkEq(ainput::qwenExtractText(""), "", "empty body yields no text");
+    checkEq(ainput::qwenExtractText("{\"output\":{}}"), "",
             "missing text yields empty");
 }
 
 void testEscapes() {
     // \u4f60\u597d = 你好
-    checkEq(vinput::jsonUnescape("\\u4f60\\u597d"), "你好",
+    checkEq(ainput::jsonUnescape("\\u4f60\\u597d"), "你好",
             "unicode escape");
-    checkEq(vinput::jsonUnescape("a\\\"b"), "a\"b", "quote escape");
-    checkEq(vinput::jsonUnescape("a\\\\b"), "a\\b", "backslash escape");
-    checkEq(vinput::jsonUnescape("a\\nb"), "a\nb", "newline escape");
+    checkEq(ainput::jsonUnescape("a\\\"b"), "a\"b", "quote escape");
+    checkEq(ainput::jsonUnescape("a\\\\b"), "a\\b", "backslash escape");
+    checkEq(ainput::jsonUnescape("a\\nb"), "a\nb", "newline escape");
     // Surrogate pair U+4E2D U+D860? Use a valid pair: U+20BB7 (𠮷).
-    checkEq(vinput::jsonUnescape("\\ud842\\udfb7"), "\xF0\xA0\xAE\xB7",
+    checkEq(ainput::jsonUnescape("\\ud842\\udfb7"), "\xF0\xA0\xAE\xB7",
             "surrogate pair escape");
-    checkEq(vinput::jsonEscape("a\"b\\c\n"), "a\\\"b\\\\c\\n",
+    checkEq(ainput::jsonEscape("a\"b\\c\n"), "a\\\"b\\\\c\\n",
             "jsonEscape round trip characters");
-    checkEq(vinput::jsonUnescape(vinput::jsonEscape("引号\"反斜杠\\")),
+    checkEq(ainput::jsonUnescape(ainput::jsonEscape("引号\"反斜杠\\")),
             "引号\"反斜杠\\", "escape round trip");
 }
 
@@ -94,60 +94,60 @@ void testTopLevelString() {
     // Nested same-name key must not shadow the outer one.
     std::string json = "{\"text\":\"outer\",\"words\":[{\"text\":\"inner\"}]}";
     size_t obj = json.find('{');
-    checkEq(vinput::qjsonTopLevelString(json, obj, "text"), "outer",
+    checkEq(ainput::qjsonTopLevelString(json, obj, "text"), "outer",
             "top-level text beats nested word text");
-    checkEq(vinput::qjsonTopLevelString(json, obj, "missing"), "",
+    checkEq(ainput::qjsonTopLevelString(json, obj, "missing"), "",
             "missing key yields empty");
     // Value of the nested object.
-    size_t words = vinput::qjsonTopLevelObject(json, obj, "words");
+    size_t words = ainput::qjsonTopLevelObject(json, obj, "words");
     check(words == std::string::npos, "words is an array, not an object");
     std::string json2 = "{\"sentence\":{\"text\":\"句\"},\"text\":\"总\"}";
     size_t obj2 = json2.find('{');
-    checkEq(vinput::qjsonTopLevelString(json2, obj2, "text"), "总",
+    checkEq(ainput::qjsonTopLevelString(json2, obj2, "text"), "总",
             "outer text preferred over sentence text");
-    size_t sentence = vinput::qjsonTopLevelObject(json2, obj2, "sentence");
+    size_t sentence = ainput::qjsonTopLevelObject(json2, obj2, "sentence");
     check(sentence != std::string::npos, "sentence object found");
-    checkEq(vinput::qjsonTopLevelString(json2, sentence, "text"), "句",
+    checkEq(ainput::qjsonTopLevelString(json2, sentence, "text"), "句",
             "sentence text extracted from nested object");
 }
 
 void testRawValue() {
     std::string cfg =
         "{\"api_key\":\"sk-1\",\"language_hints\":[\"zh\",\"en\"],"
-        "\"vocabulary\":{\"Vinput\":5,\"fcitx\":3},"
+        "\"vocabulary\":{\"Ainput\":5,\"fcitx\":3},"
         "\"keep_dialect\":true,\"endpoint\":\"https://x/y\","
         "\"note\":\"contains } brace\"}";
-    checkEq(vinput::qjsonRawValue(cfg, "language_hints"), "[\"zh\",\"en\"]",
+    checkEq(ainput::qjsonRawValue(cfg, "language_hints"), "[\"zh\",\"en\"]",
             "raw array value");
-    checkEq(vinput::qjsonRawValue(cfg, "vocabulary"),
-            "{\"Vinput\":5,\"fcitx\":3}", "raw object value");
-    checkEq(vinput::qjsonRawValue(cfg, "keep_dialect"), "true",
+    checkEq(ainput::qjsonRawValue(cfg, "vocabulary"),
+            "{\"Ainput\":5,\"fcitx\":3}", "raw object value");
+    checkEq(ainput::qjsonRawValue(cfg, "keep_dialect"), "true",
             "raw boolean value");
-    checkEq(vinput::qjsonRawValue(cfg, "endpoint"), "\"https://x/y\"",
+    checkEq(ainput::qjsonRawValue(cfg, "endpoint"), "\"https://x/y\"",
             "raw string keeps quotes");
-    checkEq(vinput::qjsonRawValue(cfg, "api_key"), "\"sk-1\"",
+    checkEq(ainput::qjsonRawValue(cfg, "api_key"), "\"sk-1\"",
             "raw api key");
-    checkEq(vinput::qjsonRawValue(cfg, "note"), "\"contains } brace\"",
+    checkEq(ainput::qjsonRawValue(cfg, "note"), "\"contains } brace\"",
             "brace inside string does not terminate object");
-    checkEq(vinput::qjsonRawValue(cfg, "absent"), "", "absent key");
-    checkEq(vinput::qjsonStringValue(cfg, "api_key"), "sk-1",
+    checkEq(ainput::qjsonRawValue(cfg, "absent"), "", "absent key");
+    checkEq(ainput::qjsonStringValue(cfg, "api_key"), "sk-1",
             "string value without quotes");
-    checkEq(vinput::qjsonStringValue(cfg, "endpoint"), "https://x/y",
+    checkEq(ainput::qjsonStringValue(cfg, "endpoint"), "https://x/y",
             "string value for endpoint");
 }
 
 void testErrorDetail() {
-    checkEq(vinput::qwenExtractErrorDetail(
+    checkEq(ainput::qwenExtractErrorDetail(
                 "{\"code\":\"InvalidApiKey\",\"message\":\"Invalid API-key\","
                 "\"request_id\":\"r\"}"),
             "InvalidApiKey: Invalid API-key", "code+message detail");
-    checkEq(vinput::qwenExtractErrorDetail("{\"message\":\"boom\"}"), "boom",
+    checkEq(ainput::qwenExtractErrorDetail("{\"message\":\"boom\"}"), "boom",
             "message-only detail");
-    checkEq(vinput::qwenExtractErrorDetail(""), "", "empty body detail");
+    checkEq(ainput::qwenExtractErrorDetail(""), "", "empty body detail");
 }
 
 void testRemoveTopLevelProperty() {
-    using vinput::qjsonRemoveTopLevelProperty;
+    using ainput::qjsonRemoveTopLevelProperty;
     checkEq(qjsonRemoveTopLevelProperty(
                 "{\"api_key\":\"x\",\"model\":\"y\"}", "api_key"),
             "{\"model\":\"y\"}", "remove first property");
@@ -170,7 +170,7 @@ void testRemoveTopLevelProperty() {
         "{\"vocabulary\":{\"api_key\":\"keep\"},\"api_key\":\"drop\","
         "\"model\":\"m\"}";
     std::string stripped = qjsonRemoveTopLevelProperty(nested, "api_key");
-    checkEq(vinput::qjsonStringValue(stripped, "model"), "m",
+    checkEq(ainput::qjsonStringValue(stripped, "model"), "m",
             "model survives nested case");
     check(stripped.find("keep") != std::string::npos,
           "nested api_key value kept");
@@ -196,96 +196,96 @@ void testRemoveTopLevelProperty() {
 }
 
 void testLegacyDetection() {
-    check(vinput::qwenIsLegacyModel("qwen3-asr-flash"), "qwen3 mainline");
-    check(vinput::qwenIsLegacyModel("qwen3-asr-flash-2025-09-08"),
+    check(ainput::qwenIsLegacyModel("qwen3-asr-flash"), "qwen3 mainline");
+    check(ainput::qwenIsLegacyModel("qwen3-asr-flash-2025-09-08"),
           "qwen3 snapshot");
-    check(!vinput::qwenIsLegacyModel("qwen-audio-3.1-asr-flash"),
+    check(!ainput::qwenIsLegacyModel("qwen-audio-3.1-asr-flash"),
           "new-gen is not legacy");
-    check(!vinput::qwenIsLegacyModel("fun-asr-flash-2026-06-15"),
+    check(!ainput::qwenIsLegacyModel("fun-asr-flash-2026-06-15"),
           "fun-asr is not legacy");
-    check(!vinput::qwenIsLegacyModel("some-future-model"),
+    check(!ainput::qwenIsLegacyModel("some-future-model"),
           "unknown models default to new style");
 
-    check(vinput::qwenUsesLegacyRequest("qwen3-asr-flash"),
+    check(ainput::qwenUsesLegacyRequest("qwen3-asr-flash"),
           "legacy wire format for qwen3");
-    check(!vinput::qwenUsesLegacyRequest("qwen-audio-3.1-asr-flash"),
+    check(!ainput::qwenUsesLegacyRequest("qwen-audio-3.1-asr-flash"),
           "new style for 3.1");
-    check(!vinput::qwenUsesLegacyRequest("some-future-model"),
+    check(!ainput::qwenUsesLegacyRequest("some-future-model"),
           "unknown models default to new style");
 }
 
 void testStripComments() {
-    auto stripped = vinput::qjsonStripComments(
+    auto stripped = ainput::qjsonStripComments(
         "{\n  // full line comment\n  \"a\": 1 // trailing\n}");
     check(stripped.find("//") == std::string::npos, "comments removed");
-    check(vinput::qjsonSyntaxError(stripped).empty(), "stripped text is JSON");
+    check(ainput::qjsonSyntaxError(stripped).empty(), "stripped text is JSON");
     check(stripped.size() == std::string("{\n  // full line comment\n  \"a\": 1 // trailing\n}").size(),
           "stripping preserves length");
 
     // '//' inside a string value is not a comment.
     std::string withUrl =
         "{\"endpoint\": \"https://dashscope.aliyuncs.com/api/v1\", \"a\": 1}";
-    check(vinput::qjsonStripComments(withUrl) == withUrl,
+    check(ainput::qjsonStripComments(withUrl) == withUrl,
           "URL inside string untouched");
 }
 
 void testSetTopLevelString() {
     // Replace an existing property.
-    auto json = vinput::qjsonSetTopLevelString(
+    auto json = ainput::qjsonSetTopLevelString(
         "{\"provider\": \"qwen\", \"ui\": {\"a\": 1}}", "provider", "doubao");
-    check(vinput::qjsonStringValue(json, "provider") == "doubao",
+    check(ainput::qjsonStringValue(json, "provider") == "doubao",
           "existing value replaced");
-    check(vinput::qjsonStringValue(json, "ui") == "",
+    check(ainput::qjsonStringValue(json, "ui") == "",
           "other properties untouched (object value)");
 
     // Insert into a non-empty object.
-    json = vinput::qjsonSetTopLevelString("{\"a\": 1}", "provider", "qwen");
-    check(vinput::qjsonSyntaxError(json).empty(), "insert keeps valid JSON");
-    check(vinput::qjsonStringValue(json, "provider") == "qwen" &&
-              vinput::qjsonRawValue(json, "a") == "1",
+    json = ainput::qjsonSetTopLevelString("{\"a\": 1}", "provider", "qwen");
+    check(ainput::qjsonSyntaxError(json).empty(), "insert keeps valid JSON");
+    check(ainput::qjsonStringValue(json, "provider") == "qwen" &&
+              ainput::qjsonRawValue(json, "a") == "1",
           "insert preserves existing keys");
 
     // Insert into an empty object.
-    json = vinput::qjsonSetTopLevelString("{}", "provider", "mock");
-    check(vinput::qjsonSyntaxError(json).empty(), "empty object stays valid");
-    check(vinput::qjsonStringValue(json, "provider") == "mock",
+    json = ainput::qjsonSetTopLevelString("{}", "provider", "mock");
+    check(ainput::qjsonSyntaxError(json).empty(), "empty object stays valid");
+    check(ainput::qjsonStringValue(json, "provider") == "mock",
           "value inserted into empty object");
 
     // Missing file (empty text) bootstraps a fresh object.
-    json = vinput::qjsonSetTopLevelString("", "provider", "mock");
-    check(vinput::qjsonSyntaxError(json).empty(), "bootstrap object valid");
-    check(vinput::qjsonStringValue(json, "provider") == "mock",
+    json = ainput::qjsonSetTopLevelString("", "provider", "mock");
+    check(ainput::qjsonSyntaxError(json).empty(), "bootstrap object valid");
+    check(ainput::qjsonStringValue(json, "provider") == "mock",
           "bootstrap value present");
 
     // Value is escaped; insert does not disturb nested objects.
-    json = vinput::qjsonSetTopLevelString(
+    json = ainput::qjsonSetTopLevelString(
         "{\"audio\": {\"denoise\": \"speexdsp\"}}", "provider", "a\"b");
-    check(vinput::qjsonSyntaxError(json).empty(), "escaped quote valid");
-    check(vinput::qjsonRawValue(json, "audio") == "{\"denoise\": \"speexdsp\"}",
+    check(ainput::qjsonSyntaxError(json).empty(), "escaped quote valid");
+    check(ainput::qjsonRawValue(json, "audio") == "{\"denoise\": \"speexdsp\"}",
           "nested section byte-identical");
 }
 
 void testSetSectionString() {
     // Update a key inside an existing section.
     std::string doc = "{\n  \"provider\": \"qwen\",\n  \"audio\": {\"lufs_target\": -16}\n}";
-    auto json = vinput::qjsonSetSectionString(doc, "audio", "denoise", "deepfilter");
-    check(vinput::qjsonSyntaxError(json).empty(), "section update stays valid");
-    check(vinput::qjsonRawValue(json, "audio") ==
+    auto json = ainput::qjsonSetSectionString(doc, "audio", "denoise", "deepfilter");
+    check(ainput::qjsonSyntaxError(json).empty(), "section update stays valid");
+    check(ainput::qjsonRawValue(json, "audio") ==
               "{\"denoise\":\"deepfilter\",\"lufs_target\": -16}",
           "section key updated, siblings kept");
-    check(vinput::qjsonStringValue(json, "provider") == "qwen",
+    check(ainput::qjsonStringValue(json, "provider") == "qwen",
           "top-level keys untouched");
 
     // Section absent: created with the single key.
-    json = vinput::qjsonSetSectionString("{\"provider\": \"qwen\"}",
+    json = ainput::qjsonSetSectionString("{\"provider\": \"qwen\"}",
                                          "audio", "denoise", "speexdsp");
-    check(vinput::qjsonSyntaxError(json).empty(), "section insert stays valid");
-    check(vinput::qjsonRawValue(json, "audio") == "{\"denoise\":\"speexdsp\"}",
+    check(ainput::qjsonSyntaxError(json).empty(), "section insert stays valid");
+    check(ainput::qjsonRawValue(json, "audio") == "{\"denoise\":\"speexdsp\"}",
           "section created");
 
     // Empty file bootstraps.
-    json = vinput::qjsonSetSectionString("", "audio", "denoise", "none");
-    check(vinput::qjsonSyntaxError(json).empty(), "bootstrap section valid");
+    json = ainput::qjsonSetSectionString("", "audio", "denoise", "none");
+    check(ainput::qjsonSyntaxError(json).empty(), "bootstrap section valid");
 }
 
 } // namespace

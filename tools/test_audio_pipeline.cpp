@@ -33,14 +33,14 @@ int main(int argc, char **argv) {
 
     int error = 0;
     fprintf(stderr, "Opening PulseAudio...\n");
-    pa_simple *pa = pa_simple_new(nullptr, "vinput-test", PA_STREAM_RECORD,
+    pa_simple *pa = pa_simple_new(nullptr, "ainput-test", PA_STREAM_RECORD,
                                   nullptr, "voice", &ss, nullptr, nullptr, &error);
     if (!pa) {
         fprintf(stderr, "PA error: %s\n", pa_strerror(error));
         return 1;
     }
 
-    size_t bufferBytes = vinput::loadOrDetectBufferBytes();
+    size_t bufferBytes = ainput::loadOrDetectBufferBytes();
     fprintf(stderr, "Buffer: %zu bytes\n", bufferBytes);
 
     std::vector<uint8_t> buf(bufferBytes);
@@ -71,8 +71,8 @@ int main(int argc, char **argv) {
     if (samples.empty()) return 1;
 
     auto t0 = std::chrono::steady_clock::now();
-    vinput::AudioCapture::processSamples(samples, denoiser);
-    vinput::AudioCapture::writeWav(samples, outPath);
+    ainput::AudioCapture::processSamples(samples, denoiser);
+    ainput::AudioCapture::writeWav(samples, outPath);
 
     auto t1 = std::chrono::steady_clock::now();
     fprintf(stderr, "Written: %s (%zu samples, %.1fs, pipeline=%ldms)\n",

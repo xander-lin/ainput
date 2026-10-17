@@ -1,8 +1,8 @@
 [Addon]
-Name=Vinput
+Name=Ainput
 Category=Module
 Version=@PROJECT_VERSION@
-Library=vinput
+Library=ainput
 Type=SharedLibrary
 OnDemand=False
 Configurable=True

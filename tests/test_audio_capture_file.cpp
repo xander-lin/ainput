@@ -16,7 +16,7 @@ std::string tempWavPath() {
     if (!tmp || !*tmp) {
         tmp = "/tmp";
     }
-    return std::string(tmp) + "/vinput-audio-capture-file.wav";
+    return std::string(tmp) + "/ainput-audio-capture-file.wav";
 }
 
 uint32_t readLe32(const std::vector<unsigned char> &bytes, size_t offset) {
@@ -38,7 +38,7 @@ int main() {
         samples[i] = static_cast<int16_t>(std::sin(phase) * 12000.0);
     }
 
-    vinput::AudioCapture::processSamples(samples, "none");
+    ainput::AudioCapture::processSamples(samples, "none");
 
     if (samples.empty()) {
         std::cerr << "audio pipeline removed all generated samples\n";
@@ -46,7 +46,7 @@ int main() {
     }
 
     auto path = tempWavPath();
-    vinput::AudioCapture::writeWav(samples, path);
+    ainput::AudioCapture::writeWav(samples, path);
 
     std::ifstream input(path, std::ios::binary);
     if (!input) {

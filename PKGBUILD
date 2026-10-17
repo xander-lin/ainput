@@ -1,7 +1,7 @@
 # Maintainer: xander-lin
 
-pkgname=fcitx5-vinput-git
-_pkgname=fcitx5-vinput
+pkgname=fcitx5-ainput-git
+_pkgname=fcitx5-ainput
 # Placeholder only — makepkg needs a non-empty pkgver before it downloads the
 # VCS source, and AUR/paru display whatever sits here (they cannot run
 # pkgver()). Keep it at the current real version so the AUR listing is not
@@ -11,14 +11,14 @@ pkgver=0.1.0.r156.a14c651
 pkgrel=1
 pkgdesc="Voice input addon for fcitx5: push-to-talk ASR via CapsLock"
 arch=('x86_64')
-url="https://github.com/xander-lin/vinput"
+url="https://github.com/xander-lin/ainput"
 license=('MIT')
 depends=('fcitx5' 'libebur128' 'libpulse' 'curl' 'speexdsp' 'libsoxr')
 makedepends=('git' 'meson' 'ninja')
 provides=("$_pkgname")
 conflicts=("$_pkgname")
 install=PKGBUILD.install
-source=("$_pkgname::git+https://gitee.com/xander-lin/vinput.git")
+source=("$_pkgname::git+https://gitee.com/xander-lin/ainput.git")
 sha256sums=('SKIP')
 
 pkgver() {

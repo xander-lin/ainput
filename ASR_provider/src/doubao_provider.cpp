@@ -1,7 +1,7 @@
 #include "doubao_provider.h"
 #include "config_schema.h"
 #include "config_templates.h"
-#include "vinput_config.h"
+#include "ainput_config.h"
 #include "diagnostic_log.h"
 
 #include <curl/curl.h>
@@ -17,7 +17,7 @@
 #include <fstream>
 #include <memory>
 
-namespace vinput {
+namespace ainput {
 
 // Query poll cadence; retired from config with the other tuning knobs.
 constexpr int kDoubaoPollIntervalMsec = 800;
@@ -273,7 +273,7 @@ void DoubaoAsrProvider::processRecording(std::vector<int16_t> samples,
                         deadline - std::chrono::steady_clock::now()).count();
         return left < 0 ? 0L : (long)left;
     };
-    fprintf(stderr, "Vinput Doubao: recorded %zu samples to %s (model_name=%s)\n",
+    fprintf(stderr, "Ainput Doubao: recorded %zu samples to %s (model_name=%s)\n",
             samples.size(), wavPath.c_str(), settings.modelName.c_str());
     diagnosticLog().event("provider", "request_started", {
         {"provider", "doubao"}, {"recognition_id", std::to_string(diagnosticId)},
@@ -298,7 +298,7 @@ void DoubaoAsrProvider::processRecording(std::vector<int16_t> samples,
             {"provider", "doubao"}, {"recognition_id", std::to_string(diagnosticId)},
             {"reason", "missing_credentials"}
         });
-        if (onE) onE("Doubao: missing api_key or resource_id in ~/.config/vinput/doubao.json", AsrErrorCategory::ConfigMissing);
+        if (onE) onE("Doubao: missing api_key or resource_id in ~/.config/ainput/doubao.json", AsrErrorCategory::ConfigMissing);
         return;
     }
 
@@ -382,7 +382,7 @@ void DoubaoAsrProvider::processRecording(std::vector<int16_t> samples,
             curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &httpCode);
             curl_slist_free_all(headers);
 
-            fprintf(stderr, "Vinput Doubao: submit HTTP %ld\n", httpCode);
+            fprintf(stderr, "Ainput Doubao: submit HTTP %ld\n", httpCode);
             if (res != CURLE_OK) {
                 if (cancel->load()) {
                     diagnosticLog().event("provider", "request_cancelled", {
@@ -392,7 +392,7 @@ void DoubaoAsrProvider::processRecording(std::vector<int16_t> samples,
                     });
                     return;
                 }
-                fprintf(stderr, "Vinput Doubao: submit failed, curl=%d (%s), response_bytes=%zu\n",
+                fprintf(stderr, "Ainput Doubao: submit failed, curl=%d (%s), response_bytes=%zu\n",
                         (int)res, curl_easy_strerror(res), respBody.size());
                 evictCurlHandle();
                 diagnosticLog().event("provider", "request_error", {
@@ -422,7 +422,7 @@ void DoubaoAsrProvider::processRecording(std::vector<int16_t> samples,
 
             std::string statusCode = getHeader(respHdr, "x-api-status-code");
             if (!statusCode.empty() && statusCode != "20000000") {
-                fprintf(stderr, "Vinput Doubao: submit rejected status=%s\n", statusCode.c_str());
+                fprintf(stderr, "Ainput Doubao: submit rejected status=%s\n", statusCode.c_str());
                 if (onE) onE("Doubao: submit rejected (" + statusCode + ")",
                     classifyDoubaoStatus(statusCode));
                 return;
@@ -506,7 +506,7 @@ void DoubaoAsrProvider::processRecording(std::vector<int16_t> samples,
                 consecutiveNetworkErrors++;
                 evictCurlHandle();
                 fprintf(stderr,
-                        "Vinput Doubao: query #%d HTTP %ld curl=%d (%s), retry %d/3\n",
+                        "Ainput Doubao: query #%d HTTP %ld curl=%d (%s), retry %d/3\n",
                         pollCount, httpCode, (int)res, curl_easy_strerror(res),
                         consecutiveNetworkErrors);
                 if (consecutiveNetworkErrors >= 3) {
@@ -549,7 +549,7 @@ void DoubaoAsrProvider::processRecording(std::vector<int16_t> samples,
             if (statusCode == "20000000") {
                 auto tResult = std::chrono::steady_clock::now();
                 std::string text = jsonGetString(respBody, "text");
-                fprintf(stderr, "Vinput Doubao [timer] encode=%ldms submit=%ldms poll=%ldms poll_n=%d text_len=%zu\n",
+                fprintf(stderr, "Ainput Doubao [timer] encode=%ldms submit=%ldms poll=%ldms poll_n=%d text_len=%zu\n",
                         (long)std::chrono::duration_cast<std::chrono::milliseconds>(tEncode - t0).count(),
                         (long)std::chrono::duration_cast<std::chrono::milliseconds>(tSubmit - tEncode).count(),
                         (long)std::chrono::duration_cast<std::chrono::milliseconds>(tResult - tSubmit).count(),
@@ -571,7 +571,7 @@ void DoubaoAsrProvider::processRecording(std::vector<int16_t> samples,
             }
             if (statusCode == "20000003") {
                 auto tResult = std::chrono::steady_clock::now();
-                fprintf(stderr, "Vinput Doubao [timer] encode=%ldms submit=%ldms poll=%ldms poll_n=%d (silence)\n",
+                fprintf(stderr, "Ainput Doubao [timer] encode=%ldms submit=%ldms poll=%ldms poll_n=%d (silence)\n",
                         (long)std::chrono::duration_cast<std::chrono::milliseconds>(tEncode - t0).count(),
                         (long)std::chrono::duration_cast<std::chrono::milliseconds>(tSubmit - tEncode).count(),
                         (long)std::chrono::duration_cast<std::chrono::milliseconds>(tResult - tSubmit).count(),
@@ -590,16 +590,16 @@ void DoubaoAsrProvider::processRecording(std::vector<int16_t> samples,
                     {"recognition_id", std::to_string(diagnosticId)},
                     {"reason", "recognition_status"}
                 });
-                fprintf(stderr, "Vinput Doubao: query status=%s response_bytes=%zu\n",
+                fprintf(stderr, "Ainput Doubao: query status=%s response_bytes=%zu\n",
                         statusCode.c_str(), respBody.size());
                 if (onE) onE("Doubao: recognition failed (" + statusCode + ")",
                         classifyDoubaoStatus(statusCode));
                 return;
             }
-            fprintf(stderr, "Vinput Doubao: query #%d processing...\n", pollCount);
+            fprintf(stderr, "Ainput Doubao: query #%d processing...\n", pollCount);
         }
 
-        fprintf(stderr, "Vinput Doubao: query timeout\n");
+        fprintf(stderr, "Ainput Doubao: query timeout\n");
         diagnosticLog().event("provider", "request_timeout", {
             {"provider", "doubao"},
             {"recognition_id", std::to_string(diagnosticId)}
@@ -639,4 +639,4 @@ static bool _doubaoReg = []() {
     return true;
 }();
 
-} // namespace vinput
+} // namespace ainput

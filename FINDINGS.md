@@ -1,4 +1,4 @@
-# Vinput 开发发现记录
+# Ainput 开发发现记录
 
 ## 2026-06-16 (续)
 
@@ -16,11 +16,11 @@
 - 运行：`build/tools/test_uinput_caps --taps 1 --settle-ms 800`
 
 #### 当前观测
-- 在 Hyprland 会话中运行后，Hyprland 里新增的 `vinput-uinput-caps-test` 键盘存在，但 `hyprctl devices -j` 显示所有键盘 `capsLock=false`。
+- 在 Hyprland 会话中运行后，Hyprland 里新增的 `ainput-uinput-caps-test` 键盘存在，但 `hyprctl devices -j` 显示所有键盘 `capsLock=false`。
 - 这说明独立 `uinput` 虚拟键盘已创建并发出事件，但当前事件序列没有把 Hyprland 的 CapsLock 锁定状态置为 on。
 
 #### 后续方向
-- 优先在 `tools/test_uinput_caps.cpp` 上继续隔离实验，调整事件序列后再回写到 `adapter/src/vinput.cpp`。
+- 优先在 `tools/test_uinput_caps.cpp` 上继续隔离实验，调整事件序列后再回写到 `adapter/src/ainput.cpp`。
 - 不要回到整插件安装验证流程，避免把构建/安装成本混入单变量测试。
 - 更长期的正确方向是调用 Hyprland API 做真正意义上的 compositor 内部控制：在 Hyprland 内部读写 CapsLock/XKB lock state，而不是通过另一个虚拟键盘间接影响。
 - 当前阶段不实现 Hyprland 内部控制；本次以交互调整方案收尾。
@@ -32,7 +32,7 @@
 - 用户不采用键盘代理、Hyprland 插件、禁用 CapsLock、换触发键等方案。
 
 #### 方案
-- `adapter/src/vinput.cpp` 新增 `VinputAddon::isHyprlandSession()`，通过 `HYPRLAND_INSTANCE_SIGNATURE` 判断 Hyprland。
+- `adapter/src/ainput.cpp` 新增 `AinputAddon::isHyprlandSession()`，通过 `HYPRLAND_INSTANCE_SIGNATURE` 判断 Hyprland。
 - 非 Hyprland 行为保持不变：长按 CapsLock 激活录音，松开停止录音并通过 `revertCapsLock()` 恢复 CapsLock。
 - Hyprland 行为改为：长按 CapsLock 激活录音，第一次松开不停止录音；录音中再次按下 CapsLock 才停止录音，并调用 `onDeactivate(false)`，不再尝试恢复 CapsLock。
 
@@ -46,12 +46,12 @@
 - 同一套 uinput CapsLock 还原逻辑在 niri 上可正常工作，但在 Hyprland 上 CapsLock 不会恢复。
 
 #### 根因
-- `adapter/src/vinput.cpp` 的 `VinputAddon::revertCapsLock()` 原先把虚拟 CapsLock press 与 release 写入同一个 `SYN_REPORT` 同步帧。
+- `adapter/src/ainput.cpp` 的 `AinputAddon::revertCapsLock()` 原先把虚拟 CapsLock press 与 release 写入同一个 `SYN_REPORT` 同步帧。
 - niri 能接受这种事件序列并切换锁定状态；Hyprland/libinput 路径下同帧 press+release 不可靠，可能被折叠或不触发 CapsLock 锁定状态第二次切换。
 
 #### 尝试
-- `VinputAddon::revertCapsLock()` 改为：发送 `KEY_CAPSLOCK press` → `SYN_REPORT` → `KEY_CAPSLOCK release` → `SYN_REPORT`。
-- 修改范围仅限 `adapter/src/vinput.cpp`，不改变按键状态机、录音生命周期、桌面策略或输出提交逻辑。
+- `AinputAddon::revertCapsLock()` 改为：发送 `KEY_CAPSLOCK press` → `SYN_REPORT` → `KEY_CAPSLOCK release` → `SYN_REPORT`。
+- 修改范围仅限 `adapter/src/ainput.cpp`，不改变按键状态机、录音生命周期、桌面策略或输出提交逻辑。
 
 #### 后续结论
 - 该尝试在 Hyprland 下仍不能可靠恢复实际 CapsLock lock state，最终采用上方“再按一次停止录音”的 Hyprland 专用交互调整。
@@ -63,7 +63,7 @@
 ### 桌面环境自动检测（替代 output.json 配置）
 
 #### 动机
-原先 `OutputHandler` 构造函数从 `~/.config/vinput/output.json` 的 `desktop` 字段读取桌面环境（`niri`/`hyprland`/`none`），需要用户手动配置。实际上 compositor 可以通过环境变量自动检测，无需用户干预。
+原先 `OutputHandler` 构造函数从 `~/.config/ainput/output.json` 的 `desktop` 字段读取桌面环境（`niri`/`hyprland`/`none`），需要用户手动配置。实际上 compositor 可以通过环境变量自动检测，无需用户干预。
 
 #### 方案
 - `DesktopStrategy` 新增 `static autoDetect()` 方法，通过环境变量检测当前 compositor：
@@ -97,9 +97,9 @@
 ### 安装/更新配置文件策略
 
 - 用户要求语义：配置文件不存在时安装，存在时更新不能覆盖用户配置。
-- Arch/pacman 正确实现路径不是写入 `~/.config/vinput/`：包安装脚本以 root 运行，无法可靠判断目标普通用户 home。
+- Arch/pacman 正确实现路径不是写入 `~/.config/ainput/`：包安装脚本以 root 运行，无法可靠判断目标普通用户 home。
 - 当前方案：`PKGBUILD` 把 `config/*.json.example` 安装为 `/etc/vinput/*.json`，并在 `backup=(...)` 中声明这些文件；pacman 首次安装会创建它们，升级时会保留本地修改并按 pacman 规则生成 `.pacnew`。
-- 运行时读取顺序：`ASR_provider/src/vinput_config.h` 的 `readConfigFile()` 先读 `~/.config/vinput/<name>`；用户文件缺失且 `/etc/vinput/<name>` 存在时，会自动复制到 `~/.config/vinput/<name>` 后读取；已有用户文件不覆盖。原先 `adapter/src/output_handler.cpp` 的 `output.json` 读取也走同一规则；桌面策略移除后不再读取该文件。
+- 运行时读取顺序：`ASR_provider/src/ainput_config.h` 的 `readConfigFile()` 先读 `~/.config/ainput/<name>`；用户文件缺失且 `/etc/vinput/<name>` 存在时，会自动复制到 `~/.config/ainput/<name>` 后读取；已有用户文件不覆盖。原先 `adapter/src/output_handler.cpp` 的 `output.json` 读取也走同一规则；桌面策略移除后不再读取该文件。
 - `PKGBUILD` 构建参数使用 `meson setup ... --buildtype=plain -Dcpp_args='-O2 -march=native'`，按当前机器启用 O2 和 native CPU 优化。
 - `PKGBUILD.install` 中本地模型需自行下载的提示使用 ANSI 红字输出。
 
@@ -113,7 +113,7 @@
 3. 16K + drain → 可行但延迟大
 
 #### 最终方案
-- **动态缓冲区**: 首次使用自动检测硬件 burst 大小, 缓存到 `~/.config/vinput/pa_buffer.json`
+- **动态缓冲区**: 首次使用自动检测硬件 burst 大小, 缓存到 `~/.config/ainput/pa_buffer.json`
 - 检测逻辑 (`buffer_detect.cpp`): 256 字节小 buffer 录 6s, 聚类读写耗时识别 fill/burst 周期
 - 每次 `pa_simple_read(buf, N)` 中的 N = 检测到的 burst 字节数, 恰好对齐单周期
 - 无 drain, 无额外的延迟
@@ -133,7 +133,7 @@ niri 窗口切换逻辑硬编码在 `OutputHandler` 中，无法支持其他桌�
   - `NiriStrategy`: `niri msg focused-window` / `niri msg action focus-window --id`
   - `HyprlandStrategy`: `hyprctl activewindow -j` / `hyprctl dispatch focuswindow address:`
 - `OutputHandler` 通过 `DesktopStrategy::create(desktop)` 工厂选择策略
-- 配置文件: `~/.config/vinput/output.json` — `{"desktop": "niri"|"hyprland"|"gnome"|"none"}`
+- 配置文件: `~/.config/ainput/output.json` — `{"desktop": "niri"|"hyprland"|"gnome"|"none"}`
 - 默认值: `"none"`（不执行窗口切换）
 
 #### GNOME 支持情况
@@ -144,12 +144,12 @@ niri 窗口切换逻辑硬编码在 `OutputHandler` 中，无法支持其他桌�
 - `adapter/src/desktop_strategy.h/.cpp`：新增，~70 行 + ~70 行
 - `adapter/src/output_handler.h`：移除静态 niri 方法，新增 `desktop_` 成员
 - `adapter/src/output_handler.cpp`：构造函数读取 `output.json` 并实例化策略，所有 niri 调用改为 `desktop_->` 多态调用
-- `adapter/src/vinput.cpp`：无变化
+- `adapter/src/ainput.cpp`：无变化
 - `adapter/src/meson.build`：添加 `desktop_strategy.cpp`
 
 
 #### 配置文件
-- 路径: `~/.config/vinput/pa_buffer.json`
+- 路径: `~/.config/ainput/pa_buffer.json`
 - 格式: `{"buffer_bytes": 64000}`
 - 未配置时自动检测, 检测后在输入框显示 "Detecting hardware buffer period..."
 - 连续流声卡(无 burst 模式) fallback 到 16384
@@ -158,7 +158,7 @@ niri 窗口切换逻辑硬编码在 `OutputHandler` 中，无法支持其他桌�
 - 新增: `ASR_provider/src/buffer_detect.h`, `buffer_detect.cpp`
 - `asr_provider.h`: 新增 `AsrStatusTextCallback` + `onStatusText_`
 - 三个 provider: 动态 `std::vector<uint8_t> buf(bufferBytes_)`, 检测前显示状态
-- `vinput.cpp`: PendingCommit 加 `isStatus` 字段, pipe reader 用 `commitString` 直接上屏
+- `ainput.cpp`: PendingCommit 加 `isStatus` 字段, pipe reader 用 `commitString` 直接上屏
 
 #### pa_simple_read 关键特性
 - `pa_simple_read(buf, N)` 成功时**必定返回恰好 N 字节**, 数据不足就死等
@@ -227,7 +227,7 @@ niri 窗口切换逻辑硬编码在 `OutputHandler` 中，无法支持其他桌�
 - HTTP 层超时设为 15s，curl 错误时 continue 重试
 
 #### 配置
-- 文件: `~/.config/vinput/doubao.json`
+- 文件: `~/.config/ainput/doubao.json`
 - 格式: `{"api_key":"xxx", "resource_id":"volc.seedasr.auc"}`
 - 资源 ID: `volc.bigasr.auc` (1.0 小时版) / `volc.seedasr.auc` (2.0)
 
@@ -437,7 +437,7 @@ fcitx5 addon                    systemd --user               sherpa server
   │  ├─ yes → connect                │                           │
   │  └─ no  → system("systemctl    │                           │
   │            --user start         │                           │
-  │            vinput-sherpa-       │                           │
+  │            ainput-sherpa-       │                           │
   │            zipformer")  ──────► │ fork+exec ──────────────► │
   │              wait port ◄────── │                           │
   │              connect ──────────────────────────────────►  │
@@ -457,18 +457,18 @@ fcitx5 addon                    systemd --user               sherpa server
 - `Slice=user-expensive.slice`: 不挤占桌面进程资源
 
 #### 日志
-- `~/.local/share/vinput/logs/zipformer-server.log`
-- `~/.local/share/vinput/logs/fire-red-server.log`
+- `~/.local/share/ainput/logs/zipformer-server.log`
+- `~/.local/share/ainput/logs/fire-red-server.log`
 
 #### 注意事项
 - 服务有 `RestartSec=5`，崩后 5s 内新一轮识别会 connect 失败（已在 try-catch 中处理，触发 error callback）
 - 两个 server 常驻会占内存（尤其是 FireRed ~5GB），未来可加 idle 自动 stop 机制
-- 如果不需要常驻，`systemctl --user disable --now vinput-sherpa-*` 即可，不影响代码
+- 如果不需要常驻，`systemctl --user disable --now ainput-sherpa-*` 即可，不影响代码
 
 ### rime 拉丁字母模式切换（已解决）
 
 #### 现象
-每次按下 CapsLock，rime 输入方案从雾凇拼音切到拉丁字母（ASCII 模式）。长短按都触发，和 Vinput 插件代码无关。
+每次按下 CapsLock，rime 输入方案从雾凇拼音切到拉丁字母（ASCII 模式）。长短按都触发，和 Ainput 插件代码无关。
 
 #### 根因
 rime 默认配置 `~/.local/share/fcitx5/rime/build/default.yaml`：
@@ -519,14 +519,14 @@ v1.13.2 二进制启动后 ~15s 必定 SIGABRT 崩溃，与 `--num-threads` 和�
 - **不需要轮询**: DashScope multimodal API 是同步的，一次 HTTP 调用直接返回识别文本
 - **Data URL 格式**: base64 前需加 `data:audio/wav;base64,` 前缀
 - **消息格式**: 使用 multimodal conversation 格式而非纯 ASR 格式
-- **配置路径**: `~/.config/vinput/qwen.json`（仅 `api_key` 一个字段）
+- **配置路径**: `~/.config/ainput/qwen.json`（仅 `api_key` 一个字段）
 
 #### 代码位置
 - `ASR_provider/src/qwen_provider.h` — 头文件
 - `ASR_provider/src/qwen_provider.cpp` — 实现
 - Provider ID: `"qwen"`, 显示名: `"Qwen3-ASR-Flash (Alibaba DashScope)"`
 - 工厂注册: 在 `qwen_provider.cpp` 末尾 static 初始化器自动注册
-- `adapter/src/vinput.cpp:36` — include 确保链接
+- `adapter/src/ainput.cpp:36` — include 确保链接
 - `ASR_provider/src/meson.build:13-14` — 编译条目
 
 #### 配置示例
@@ -572,7 +572,7 @@ https://bailian.console.aliyun.com/?tab=model#/api-key（北京地域）
 | speexdsp | 单线程（自适应，分块会失效） | 3ms | 频谱减法，帧间累积噪声模型 |
 | deepfilter | 单核（GRU 串行依赖） | 220ms | DeepFilterNet3, ONNX tract 推理 |
 
-- **config**: `~/.config/vinput/audio.json` — `{"denoise": "speexdsp"}` / `"deepfilter"` / `false`
+- **config**: `~/.config/ainput/audio.json` — `{"denoise": "speexdsp"}` / `"deepfilter"` / `false`
 - **deepfilter 二进制**: 自编译（`cargo build --release`），含 `--stay` 常驻 daemon 消除模型加载开销（777ms→220ms）
 - **deefilter 重采样**: libsoxr 16k↔48k（纯 C，零 Python 依赖）
 - **speexdsp 多线程失败原因**: 自适应噪声学习依赖连续帧，分块=每块从头学=无效，回退单线程
@@ -584,7 +584,7 @@ https://bailian.console.aliyun.com/?tab=model#/api-key（北京地域）
 - `tools/test_audio_file` — 文件处理测试（WAV → 流水线 → WAV）
 
 #### DeepFilterNet3 细节
-- 二进制: `~/.local/share/vinput/bin/deep-filter`（自编译原生二进制，--stay 常驻模式）
+- 二进制: `~/.local/share/ainput/bin/deep-filter`（自编译原生二进制，--stay 常驻模式）
 - 关键发现: `deep-filter -o <dir>` 当 dir 与输入同目录时原地覆写（非额外输出）
 - musl 预编译版 vs 原生编译: 1038ms → 777ms（25% 快），加 daemon 后 218ms
 - 代码: `ASR_provider/src/audio_capture.cpp:dfDenoise()`
@@ -592,11 +592,11 @@ https://bailian.console.aliyun.com/?tab=model#/api-key（北京地域）
 ### ASR 结果→上屏 解耦（refactor: 2026-06-04）
 
 #### 动机
-`VinputAddon` 中 self-pipe reader lambda（`vinput.cpp:78-156`）将 ASR 结果处理、状态显示、niri 窗口切换、`commitString()` 调用全部耦合在一个函数中。没有抽象层，无法替换显示策略或扩展。
+`AinputAddon` 中 self-pipe reader lambda（`ainput.cpp:78-156`）将 ASR 结果处理、状态显示、niri 窗口切换、`commitString()` 调用全部耦合在一个函数中。没有抽象层，无法替换显示策略或扩展。
 
 #### 方案
 - 新增 `OutputHandler` 类（`adapter/src/output_handler.h/.cpp`）：封装 self-pipe 机制、niri 窗口焦点切换、commitString() 调用
-- `VinputAddon` 不再直接管理 pipe/PendingCommit，改由 `OutputHandler` 处理所有上屏逻辑
+- `AinputAddon` 不再直接管理 pipe/PendingCommit，改由 `OutputHandler` 处理所有上屏逻辑
 - 接口：
   - `submit(text)` — 提交 ASR 识别结果
   - `showStatus(text)` — 显示状态文本
@@ -605,14 +605,14 @@ https://bailian.console.aliyun.com/?tab=model#/api-key（北京地域）
 
 #### 各文件变化
 - `adapter/src/output_handler.h/.cpp`：新增，~130 行
-- `adapter/src/vinput.cpp`：移除 `wakePipe_`、`wakeWatcher_`、`PendingCommit`、`pendingMutex_`、`pendingCommits_`、`capturedWinId_`、`niriFocusWindow()`；新增 `outputHandler_`
+- `adapter/src/ainput.cpp`：移除 `wakePipe_`、`wakeWatcher_`、`PendingCommit`、`pendingMutex_`、`pendingCommits_`、`capturedWinId_`、`niriFocusWindow()`；新增 `outputHandler_`
 - `adapter/src/meson.build`：添加 `output_handler.cpp` 到编译源
 
 #### 解耦边界
 ```
-VinputAddon::onAsrResult()  →  OutputHandler::submit()
-VinputAddon::statusText     →  OutputHandler::showStatus()
-VinputAddon::onActivate()   →  OutputHandler::setCaptureWindow()
+AinputAddon::onAsrResult()  →  OutputHandler::submit()
+AinputAddon::statusText     →  OutputHandler::showStatus()
+AinputAddon::onActivate()   →  OutputHandler::setCaptureWindow()
 
 OutputHandler 内部:
   self-pipe  →  drainAndCommit()  →  niri 切换  →  commitString()
@@ -620,7 +620,7 @@ OutputHandler 内部:
 
 #### 当前架构全景
 ```
-┌─ VinputAddon ─────────────────────────────────────────────┐
+┌─ AinputAddon ─────────────────────────────────────────────┐
 │  KeyEvent → 生命周期 → ASR/降噪器切换 → 提示音 → 配置       │
 │                                                            │
 │  ┌──────────┐   ┌──────────────┐   ┌──────────────────┐  │
@@ -664,7 +664,7 @@ OutputHandler 内部:
 - **修复**: `audio_capture.cpp:77-80` 新增构造函数日志（显示实际解析值或 "not found"），`audio_capture.cpp:408-410` 新增 crestFactor vs crestThreshold_ 对比日志
 
 #### 辅助函数
-`vinput_config.h` 新增 `advancedSection(key)` — 从 advanced.json 提取嵌套 JSON 节。
+`ainput_config.h` 新增 `advancedSection(key)` — 从 advanced.json 提取嵌套 JSON 节。
 
 
 
@@ -674,7 +674,7 @@ OutputHandler 内部:
 
 #### 问题
 - `meson test -C build` 原先输出 `No tests defined.`，没有任何自动化回归入口。
-- `docs/vinput/06-asr-provider-api.md` 仍描述旧的 `IAsrProvider::start()/stop()` 录音契约，和当前 `transcribe(samples, wavPath)` 实现不一致。
+- `docs/ainput/06-asr-provider-api.md` 仍描述旧的 `IAsrProvider::start()/stop()` 录音契约，和当前 `transcribe(samples, wavPath)` 实现不一致。
 - `ASR_provider/` 与 `adapter/` 缺少模块级 `WhyThisArchWork.md`，不能满足模块边界和架构论证要求。
 - `ASR_provider/src/meson.build` 没有声明自身使用的 `libpulse-simple`、`libebur128`、`libcurl`、`soxr`、`speexdsp` 依赖，依赖边界泄漏到 consumer。
 
@@ -686,8 +686,8 @@ OutputHandler 内部:
 - 更新 `ASR_provider/src/meson.build`：`asr_provider_dep` 现在包含 ASR 模块自身的外部库依赖，consumer 只需依赖 `asr_provider_dep`。
 - 简化 `tools/meson.build`：`test_audio_file` 只依赖 `asr_provider_dep`；`test_audio_pipeline` 额外保留直接使用的 `libpulse-simple`。
 - 更新 `.gitignore`：忽略当前实际本地构建目录 `build/` 和项目级虚拟环境 `.venv/`。
-- 重写 `docs/vinput/06-asr-provider-api.md`：当前契约是 `AudioCapture -> samples + wavPath -> IAsrProvider::transcribe() -> onResult/onError`。
-- 重写 `docs/vinput/05-voice-input-design.md`：补齐 `VinputAddon`、`AudioCapture`、`IAsrProvider`、`OutputHandler`、`DesktopStrategy` 的当前数据流和失败模式。
+- 重写 `docs/ainput/06-asr-provider-api.md`：当前契约是 `AudioCapture -> samples + wavPath -> IAsrProvider::transcribe() -> onResult/onError`。
+- 重写 `docs/ainput/05-voice-input-design.md`：补齐 `AinputAddon`、`AudioCapture`、`IAsrProvider`、`OutputHandler`、`DesktopStrategy` 的当前数据流和失败模式。
 - 新增 `ASR_provider/WhyThisArchWork.md` 与 `adapter/WhyThisArchWork.md`，记录职责边界、依赖、数据流、失败模式、替换成本、验证方式和独立子 Agent 审查结论。
 
 #### 验证
@@ -710,8 +710,8 @@ OutputHandler 内部:
 #### 已改动
 - `config/doubao.json`、`config/qwen.json`、`config/output.json`、`config/audio.json`、`config/vinput.json`、`config/advanced.json` 迁移为对应的 `.json.example` 文件。
 - `.gitignore` 新增 `config/*.json`，避免仓库误收真实本地配置；`.json.example` 仍可跟踪。
-- `README.md` 改为复制 `config/*.json.example` 到 `~/.config/vinput/*.json` 后再编辑本地配置。
-- `README.md` 的 AUR 示例从 `yay -S fcitx5-vinput-git` 改为 `paru -S fcitx5-vinput-git`。
+- `README.md` 改为复制 `config/*.json.example` 到 `~/.config/ainput/*.json` 后再编辑本地配置。
+- `README.md` 的 AUR 示例从 `yay -S fcitx5-ainput-git` 改为 `paru -S fcitx5-ainput-git`。
 - 新增 `tools/README.md`，明确 `tools/` 是手动诊断和集成辅助；默认自动化测试在 `tests/` 中通过 `meson test -C build` 运行。
 - `tools/meson.build` 删除不再需要的直接依赖查询，仅保留 `test_audio_pipeline` 直接使用的 `libpulse-simple`。
 
@@ -729,8 +729,8 @@ OutputHandler 内部:
 
 #### 已改动
 - 新增 `ASR_provider/README.md`：记录 public contract、当前逻辑分组（Core/Audio/Providers/Support/Build）、依赖归属、添加 provider 的步骤、失败边界和验证方式。
-- 新增 `config/README.md`：记录 `*.json.example` 跟踪规则、`config/*.json` 禁止跟踪规则、复制到 `~/.config/vinput/` 的初始化命令、各配置文件用途和新增配置键时的更新规则。
-- 更新 `README.md`：明确 `config/*.json.example` 只是仓库样例，运行时配置文件应放在 `~/.config/vinput/`，仓库内 `config/*.json` 被 Git 忽略。
+- 新增 `config/README.md`：记录 `*.json.example` 跟踪规则、`config/*.json` 禁止跟踪规则、复制到 `~/.config/ainput/` 的初始化命令、各配置文件用途和新增配置键时的更新规则。
+- 更新 `README.md`：明确 `config/*.json.example` 只是仓库样例，运行时配置文件应放在 `~/.config/ainput/`，仓库内 `config/*.json` 被 Git 忽略。
 
 #### 验证
 - `ninja -C build`：成功。
@@ -742,13 +742,13 @@ OutputHandler 内部:
 ### 探测设备占空比缓存按设备隔离（2026-06-15）
 
 #### 问题
-- `ASR_provider/src/buffer_detect.cpp` 原先把硬件 burst 检测结果保存为 `~/.config/vinput/pa_buffer.json` 中的单个 `buffer_bytes`。
+- `ASR_provider/src/buffer_detect.cpp` 原先把硬件 burst 检测结果保存为 `~/.config/ainput/pa_buffer.json` 中的单个 `buffer_bytes`。
 - 多个 PulseAudio 录音 source 共用该值，导致一台设备的占空比/缓冲大小会错误套用到另一台设备。
 
 #### 已改动
 - `ASR_provider/src/buffer_detect.cpp` 现在通过 `pactl get-default-source` 获取当前默认 source id，并按 source id 读写缓存。
 - `pa_buffer.json` 新格式为 `{"devices":{"<source-id>":{"buffer_bytes":64000}}}`；旧格式 `{"buffer_bytes":64000}` 会在首次读取时迁移到当前 source。
-- 新增测试环境变量：`VINPUT_PA_BUFFER_CONFIG` 指向临时缓存文件，`VINPUT_PA_SOURCE_ID` 覆盖 source id，供自动化测试避免访问真实 PulseAudio 设备。
+- 新增测试环境变量：`AINPUT_PA_BUFFER_CONFIG` 指向临时缓存文件，`AINPUT_PA_SOURCE_ID` 覆盖 source id，供自动化测试避免访问真实 PulseAudio 设备。
 - 新增 `tests/test_buffer_detect_cache.cpp`，覆盖旧格式迁移和两台设备缓存互不覆盖。
 - 更新 `ASR_provider/WhyThisArchWork.md` 与 `tests/README.md` 记录 per-device cache 边界和验证方式。
 

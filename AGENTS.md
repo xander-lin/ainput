@@ -1,8 +1,8 @@
-# fcitx5-vinput — Project AGENTS.md
+# fcitx5-ainput — Project AGENTS.md
 
 ## Project Identity And Purpose
 
-fcitx5-vinput is a voice input addon for fcitx5 (Linux IME framework). The user
+fcitx5-ainput is a voice input addon for fcitx5 (Linux IME framework). The user
 holds **CapsLock**, speaks, releases, and the recorded audio is transcribed by an
 ASR backend and committed as text into the focused application. It serves users
 who want fast push-to-talk dictation without leaving the keyboard.
@@ -26,7 +26,7 @@ who want fast push-to-talk dictation without leaving the keyboard.
 ## Product Philosophy
 
 - Low latency and predictable UX first; diagnostics and timers are built in
-  (`Vinput Qwen [timer] encode/network/parse` logs, `diagnostic_log` events).
+  (`Ainput Qwen [timer] encode/network/parse` logs, `diagnostic_log` events).
 - Every provider must degrade loudly and recoverably: cancellable requests,
   curl handle eviction on transport failure, actionable error strings.
 - Configuration layout (2026-10 restructure, user-selected): one global
@@ -62,7 +62,7 @@ who want fast push-to-talk dictation without leaving the keyboard.
 - OS prerequisites are shipped, not assumed. CapsLock restore injects a
   synthetic CapsLock press+release through `/dev/uinput`; the package must
   therefore provide the udev rule that makes that node writable
-  (`udev/70-vinput-uinput.rules`, installed by meson). It uses
+  (`udev/70-ainput-uinput.rules`, installed by meson). It uses
   `TAG+="uaccess"` so every local user with an active session — including
   accounts created after installation — works with no group membership, and
   without granting read access to `/dev/input/event*`. Losing this rule makes
@@ -73,7 +73,7 @@ who want fast push-to-talk dictation without leaving the keyboard.
 
 - Modular, pluggable providers: a new ASR backend = new `{id}_provider.{h,cpp}`
   in `ASR_provider/src/` + factory self-registration + one line in
-  `adapter/src/vinput.cpp` to link. Keep mock provider as the interface spec.
+  `adapter/src/ainput.cpp` to link. Keep mock provider as the interface spec.
 - Cloud providers own a single serialized worker thread; tasks are queued;
   cancellation is cooperative via `std::atomic_bool`.
 - JSON parsing in providers is intentionally dependency-free (string find /
@@ -84,12 +84,12 @@ who want fast push-to-talk dictation without leaving the keyboard.
   rule (`lib/udev/rules.d`); `PKGBUILD.install` reloads udev on
   install/upgrade.
 - Release chain: repo → GitHub (`origin`) + Gitee (`gitee`, PKGBUILD source) →
-  AUR (`aur/fcitx5-vinput-git`). For a `-git` package AUR and paru can only
+  AUR (`aur/fcitx5-ainput-git`). For a `-git` package AUR and paru can only
   display the **static** `pkgver=` placeholder (they cannot run `pkgver()`),
   so keep that placeholder at the real current version and regenerate
   `.SRCINFO` (`makepkg --printsrcinfo > /tmp/x && [ -s /tmp/x ] && cp /tmp/x
   .SRCINFO`) before every push to AUR. AUR push: SSH as `aur` with the full
-  package name — `aur@aur.archlinux.org:fcitx5-vinput-git.git` (HTTPS push
+  package name — `aur@aur.archlinux.org:fcitx5-ainput-git.git` (HTTPS push
   is rejected with 403). aurweb's RPC index lags a git push by ~2 minutes, so
   a stale `paru -qa` right after pushing is normal, not a packaging bug.
 - Docs live in `docs/` (`qwen-asr-api.md` etc.), accumulated engineering notes
@@ -97,7 +97,7 @@ who want fast push-to-talk dictation without leaving the keyboard.
 
 ## Current Cloud Model Status (verified 2026-10)
 
-- `qwen` provider is config-driven end to end (`~/.config/vinput/qwen.json`):
+- `qwen` provider is config-driven end to end (`~/.config/ainput/qwen.json`):
   model (default `qwen-audio-3.1-asr-flash`), endpoint, request style
   (auto-detected per model family), language hints, instant/precompiled hot
   words, dialect retention, speaker diarization. Config is re-read on every

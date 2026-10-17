@@ -10,7 +10,7 @@
 #include <string>
 #include <vector>
 
-namespace vinput {
+namespace ainput {
 
 struct OutputTarget {
     fcitx::ICUUID uuid = {};
@@ -63,4 +63,4 @@ private:
     void wake();
 };
 
-} // namespace vinput
+} // namespace ainput

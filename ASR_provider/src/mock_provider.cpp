@@ -1,6 +1,6 @@
 #include "mock_provider.h"
 
-namespace vinput {
+namespace ainput {
 
 static bool _mockRegistered = []() {
     AsrProviderRegistry::instance().registerFactory(
@@ -12,4 +12,4 @@ void MockAsrProvider::transcribe(std::vector<int16_t>, const std::string &) {
     if (onResult_) onResult_("hello world", true);
 }
 
-} // namespace vinput
+} // namespace ainput

@@ -10,7 +10,7 @@
 #include <chrono>
 #include <thread>
 
-namespace vinput {
+namespace ainput {
 
 inline bool portReachable(int port) {
     int fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -29,19 +29,19 @@ inline bool portReachable(int port) {
 inline bool ensureSherpaService(const std::string &serviceName, int port,
                                  int timeoutSec = 10) {
     if (portReachable(port)) {
-        fprintf(stderr, "Vinput: %s port %d already up (warm)\n",
+        fprintf(stderr, "Ainput: %s port %d already up (warm)\n",
                 serviceName.c_str(), port);
         return true;
     }
 
-    fprintf(stderr, "Vinput: %s port %d not up, starting via systemctl (cold)...\n",
+    fprintf(stderr, "Ainput: %s port %d not up, starting via systemctl (cold)...\n",
             serviceName.c_str(), port);
 
     std::string cmd =
         "systemctl --user --no-block start " + serviceName;
     int ret = system(cmd.c_str());
     if (ret != 0) {
-        fprintf(stderr, "Vinput: systemctl start %s returned %d\n",
+        fprintf(stderr, "Ainput: systemctl start %s returned %d\n",
                 serviceName.c_str(), ret);
     }
 
@@ -50,15 +50,15 @@ inline bool ensureSherpaService(const std::string &serviceName, int port,
     while (std::chrono::steady_clock::now() < deadline) {
         if (portReachable(port)) {
             std::this_thread::sleep_for(std::chrono::milliseconds(200));
-            fprintf(stderr, "Vinput: %s ready after cold start\n",
+            fprintf(stderr, "Ainput: %s ready after cold start\n",
                     serviceName.c_str());
             return false;
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
-    fprintf(stderr, "Vinput: %s did not become ready within %ds\n",
+    fprintf(stderr, "Ainput: %s did not become ready within %ds\n",
             serviceName.c_str(), timeoutSec);
     throw std::runtime_error("sherpa service did not start in time");
 }
 
-}  // namespace vinput
+}  // namespace ainput

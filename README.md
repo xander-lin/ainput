@@ -1,4 +1,4 @@
-# fcitx5-vinput
+# fcitx5-ainput
 
 Voice input addon for [fcitx5](https://github.com/fcitx/fcitx5). Push-to-talk speech recognition via CapsLock.
 
@@ -19,12 +19,12 @@ listening → processing audio → recognizing → result or an actionable error
 ```
 
 You may begin the next recording while an earlier cloud request is still
-recognizing. Vinput preserves capture and commit order, and binds each result
+recognizing. Ainput preserves capture and commit order, and binds each result
 to the application and input context active when that recording began.
 
 To prevent unbounded memory and service requests, at most three recognitions
 (including the active request) are accepted at once. When the queue is full,
-Vinput shows `recognition queue full; try again` and discards only the newest
+Ainput shows `recognition queue full; try again` and discards only the newest
 recording.
 
 Cloud failures are shown in the input panel as actionable errors, one per
@@ -38,14 +38,14 @@ into the application.
 
 Holding CapsLock to dictate has a side effect: the kernel or compositor has
 already toggled the lock state on the physical key press. When you release the
-key, Vinput injects one synthetic CapsLock press+release through `/dev/uinput`
-to put the lock state back. Vinput therefore needs **write access to
+key, Ainput injects one synthetic CapsLock press+release through `/dev/uinput`
+to put the lock state back. Ainput therefore needs **write access to
 `/dev/uinput`**.
 
 It does *not* need — and should not get — read access to `/dev/input/event*`.
 These are two different things:
 
-| Node | What it grants | Needed by Vinput |
+| Node | What it grants | Needed by Ainput |
 |------|----------------|------------------|
 | `/dev/uinput` | create a virtual keyboard and inject key events | **yes** |
 | `/dev/input/event*` | read every real keystroke on the machine | no |
@@ -55,7 +55,7 @@ These are two different things:
 it, so the fix has to be a persistent udev rule. The package ships one:
 
 ```udev
-# /usr/lib/udev/rules.d/70-vinput-uinput.rules
+# /usr/lib/udev/rules.d/70-ainput-uinput.rules
 KERNEL=="uinput", SUBSYSTEM=="misc", OPTIONS+="static_node=uinput", TAG+="uaccess"
 ```
 
@@ -75,7 +75,7 @@ getfacl /dev/uinput
 A working setup lists a `user:<you>:rw-` entry. If that line is missing,
 CapsLock stays locked on after every dictation while the rest of voice input
 keeps working; the fcitx5 log then contains
-`Vinput: cannot open /dev/uinput (errno=13); CapsLock restore disabled`.
+`Ainput: cannot open /dev/uinput (errno=13); CapsLock restore disabled`.
 
 ### Apply after a manual install
 
@@ -114,7 +114,7 @@ neither problem, and it targets only `/dev/uinput`.
 
 ```bash
 # AUR (Arch Linux)
-paru -S fcitx5-vinput-git
+paru -S fcitx5-ainput-git
 
 # Manual build
 meson setup build --prefix=/usr
@@ -122,22 +122,22 @@ ninja -C build
 sudo meson install -C build
 ```
 
-The package also installs `/usr/lib/udev/rules.d/70-vinput-uinput.rules`,
-which is what lets Vinput put the CapsLock state back after dictation — see
+The package also installs `/usr/lib/udev/rules.d/70-ainput-uinput.rules`,
+which is what lets Ainput put the CapsLock state back after dictation — see
 [CapsLock Restore](#capslock-restore-devuinput) for what it does, how to
 verify it, and what to do when it is missing.
 
 ### 2. Configure (cloud ASR)
 
-Defaults are built into the code; config files under `~/.config/vinput/` are optional and sparse. Copy only what you need, and keep in mind every file supports `//` comments:
+Defaults are built into the code; config files under `~/.config/ainput/` are optional and sparse. Copy only what you need, and keep in mind every file supports `//` comments:
 
 ```bash
-mkdir -p ~/.config/vinput
+mkdir -p ~/.config/ainput
 
-# Copy tracked examples, then edit local files under ~/.config/vinput/
-cp config/config.json.example ~/.config/vinput/config.json
-cp config/qwen.json.example ~/.config/vinput/qwen.json
-cp config/doubao.json.example ~/.config/vinput/doubao.json
+# Copy tracked examples, then edit local files under ~/.config/ainput/
+cp config/config.json.example ~/.config/ainput/config.json
+cp config/qwen.json.example ~/.config/ainput/qwen.json
+cp config/doubao.json.example ~/.config/ainput/doubao.json
 
 # Cloud providers: put your API key into the JSON (plaintext; chmod 600).
 # Every config file is validated on read — typos and syntax errors are
@@ -155,12 +155,12 @@ fcitx5 -r
 ### Prepare directory layout
 
 ```bash
-mkdir -p ~/.local/share/vinput/{sherpa-onnx/bin,models}
+mkdir -p ~/.local/share/ainput/{sherpa-onnx/bin,models}
 ```
 
 Expected structure after setup:
 ```
-~/.local/share/vinput/
+~/.local/share/ainput/
 ├── sherpa-onnx/bin/
 │   ├── sherpa-onnx          # Zipformer (streaming transducer)
 │   └── sherpa-onnx-offline  # FireRed (offline AED)
@@ -184,7 +184,7 @@ VERSION=v1.13.2
 ARCHIVE="sherpa-onnx-${VERSION}-linux-x64.tar.bz2"
 curl -LO "https://github.com/k2-fsa/sherpa-onnx/releases/download/${VERSION}/${ARCHIVE}"
 tar xf "$ARCHIVE"
-cp -r "sherpa-onnx-${VERSION}-linux-x64/bin/"* ~/.local/share/vinput/sherpa-onnx/bin/
+cp -r "sherpa-onnx-${VERSION}-linux-x64/bin/"* ~/.local/share/ainput/sherpa-onnx/bin/
 
 # Clean up
 rm -rf "sherpa-onnx-${VERSION}-linux-x64" "$ARCHIVE"
@@ -202,23 +202,23 @@ MO="https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models"
 
 # Zipformer (real-time streaming transducer)
 curl -LO "$MO/sherpa-onnx-zipformer-zh-en-2023-06-26.tar.bz2"
-tar xf sherpa-onnx-zipformer-zh-en-2023-06-26.tar.bz2 -C ~/.local/share/vinput/models/
+tar xf sherpa-onnx-zipformer-zh-en-2023-06-26.tar.bz2 -C ~/.local/share/ainput/models/
 
 # FireRed (offline AED, higher accuracy)
 curl -LO "$MO/sherpa-onnx-fire-red-asr2-zh_en-int8-2026-02-26.tar.bz2"
-tar xf sherpa-onnx-fire-red-asr2-zh_en-int8-2026-02-26.tar.bz2 -C ~/.local/share/vinput/models/
+tar xf sherpa-onnx-fire-red-asr2-zh_en-int8-2026-02-26.tar.bz2 -C ~/.local/share/ainput/models/
 
 # Clean up
 rm *.tar.bz2
 ```
 
 > Model archives are at [sherpa-onnx ASR models](https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models).  
-> Custom paths can be set in `~/.config/vinput/zipformer.json` and `~/.config/vinput/fire_red.json`.
+> Custom paths can be set in `~/.config/ainput/zipformer.json` and `~/.config/ainput/fire_red.json`.
 
 
 ## Configuration
 
-All user config lives in `~/.config/vinput/`; defaults are built into the code, so files are **optional and sparse** — copy only what you want to change. Every file supports `//` line comments. There is no `/etc` layer. See man page: `man vinput`
+All user config lives in `~/.config/ainput/`; defaults are built into the code, so files are **optional and sparse** — copy only what you want to change. Every file supports `//` line comments. There is no `/etc` layer. See man page: `man ainput`
 
 `config.json`, `qwen.json` and `doubao.json` self-heal: whenever a read finds
 them missing, a commented template is regenerated (mode `0600`). Rename one
@@ -226,10 +226,10 @@ away to get a fresh template back. Seeded credentials carry a
 `PASTE_YOUR_KEY_HERE` placeholder that counts as "not configured", so the
 first recognition on a fresh install points you at the exact file to edit.
 
-Tracked files under `config/*.example` are commented examples only. Runtime `*.json` files are ignored by Git and should stay under `~/.config/vinput/`.
+Tracked files under `config/*.example` are commented examples only. Runtime `*.json` files are ignored by Git and should stay under `~/.config/ainput/`.
 
 ```
-~/.config/vinput/
+~/.config/ainput/
 ├── config.json        # provider selection + [ui] + [audio]
 ├── qwen.json          # cloud providers: api_key, model, ...
 ├── doubao.json
@@ -258,7 +258,7 @@ Cloud provider configs are re-read before each recognition, so model and paramet
 
 API keys are plaintext fields in `qwen.json`/`doubao.json` (no secret store
 integration; removed 2026-10 by design). Keep the files mode `0600`:
-`chmod 600 ~/.config/vinput/{qwen,doubao}.json`.
+`chmod 600 ~/.config/ainput/{qwen,doubao}.json`.
 
 ### Config validation
 
@@ -299,7 +299,7 @@ PulseAudio → ebur128 norm (-16 LUFS) → denoise → VAD trim → WAV → ASR 
 ```
 
 Capture uses an asynchronous PulseAudio stream. Releasing CapsLock returns
-immediately while Vinput retains a short tail window before starting audio
+immediately while Ainput retains a short tail window before starting audio
 processing, avoiding both input-method stalls and clipped final syllables.
 
 ## Reliability Notes
@@ -312,7 +312,7 @@ processing, avoiding both input-method stalls and clipped final syllables.
 ## Developer Diagnostics
 
 The developer build records one JSON object per line to
-`~/.local/share/vinput/diagnostic.log`. It is disabled by default and can be
+`~/.local/share/ainput/diagnostic.log`. It is disabled by default and can be
 enabled with the Meson option below:
 
 ```bash
@@ -322,7 +322,7 @@ sudo meson install -C build-diagnostic
 fcitx5 -r
 ```
 
-The optional `VINPUT_DIAGNOSTIC_LOG` environment variable overrides the log
+The optional `AINPUT_DIAGNOSTIC_LOG` environment variable overrides the log
 path. The file is never rotated and stops accepting new events at 1 GiB. The
 log contains no audio, API keys, or recognition text. Text and sensitive
 identifiers are represented by length and truncated SHA-256 values.
@@ -332,7 +332,7 @@ process flushes its final events:
 
 ```bash
 fcitx5 -r
-cp ~/.local/share/vinput/diagnostic.log /tmp/vinput-diagnostic.log
+cp ~/.local/share/ainput/diagnostic.log /tmp/ainput-diagnostic.log
 ```
 
 ## License

@@ -18,11 +18,11 @@
 #include "config_templates.h"
 #include "qwen_json.h"
 
-namespace vinput {
+namespace ainput {
 
 inline std::string configDir() {
     const char *h = getenv("HOME");
-    return h ? std::string(h) + "/.config/vinput" : "/tmp/vinput_cfg";
+    return h ? std::string(h) + "/.config/ainput" : "/tmp/ainput_cfg";
 }
 
 inline std::string configPath(const std::string &name) {
@@ -58,13 +58,13 @@ inline void seedConfigTemplateIfMissing(const std::string &name,
     close(fd);
     if (n > 0) {
         fprintf(stderr,
-                "Vinput: %s was missing — recreated the commented template; "
+                "Ainput: %s was missing — recreated the commented template; "
                 "edit it to configure\n",
                 path.c_str());
     }
 }
 
-// Read a config file from ~/.config/vinput/<name>. Defaults live in code, so
+// Read a config file from ~/.config/ainput/<name>. Defaults live in code, so
 // files are optional and sparse. The three seeded files regenerate from their
 // templates whenever they are found missing. // line comments are stripped
 // (string-aware, offsets preserved) before the text reaches validators and
@@ -183,4 +183,4 @@ private:
     std::shared_ptr<std::atomic_bool> cancel_;
 };
 
-} // namespace vinput
+} // namespace ainput

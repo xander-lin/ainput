@@ -71,8 +71,8 @@ int main(int argc, char **argv) {
     ioctl(fd, UI_SET_LEDBIT, LED_CAPSL);
 
     uinput_setup setup = {};
-    std::strcpy(setup.name, fullKeyboard ? "Vinput full uinput keyboard test"
-                                         : "Vinput uinput caps test");
+    std::strcpy(setup.name, fullKeyboard ? "Ainput full uinput keyboard test"
+                                         : "Ainput uinput caps test");
     setup.id.bustype = BUS_VIRTUAL;
     setup.id.vendor = 0x1;
     setup.id.product = 0x1;

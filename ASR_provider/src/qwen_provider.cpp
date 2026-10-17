@@ -2,7 +2,7 @@
 #include "qwen_json.h"
 #include "config_schema.h"
 #include "config_templates.h"
-#include "vinput_config.h"
+#include "ainput_config.h"
 #include "diagnostic_log.h"
 
 #include <curl/curl.h>
@@ -13,7 +13,7 @@
 #include <fstream>
 #include <memory>
 
-namespace vinput {
+namespace ainput {
 
 namespace {
 
@@ -227,7 +227,7 @@ void QwenAsrProvider::processRecording(std::vector<int16_t> samples,
                                         AsrResultCallback onR,
                                         AsrErrorCallback onE,
                                         uint64_t diagnosticId) {
-    fprintf(stderr, "Vinput Qwen: recorded %zu samples to %s (model=%s style=%s)\n",
+    fprintf(stderr, "Ainput Qwen: recorded %zu samples to %s (model=%s style=%s)\n",
             samples.size(), wavPath.c_str(), settings.model.c_str(),
             qwenUsesLegacyRequest(settings.model)
                 ? "legacy" : "input_audio");
@@ -254,7 +254,7 @@ void QwenAsrProvider::processRecording(std::vector<int16_t> samples,
             {"provider", "qwen"}, {"recognition_id", std::to_string(diagnosticId)},
             {"reason", "missing_api_key"}
         });
-        if (onE) onE("Qwen: missing api_key in ~/.config/vinput/qwen.json",
+        if (onE) onE("Qwen: missing api_key in ~/.config/ainput/qwen.json",
             AsrErrorCategory::ConfigMissing);
         return;
     }
@@ -319,8 +319,8 @@ void QwenAsrProvider::processRecording(std::vector<int16_t> samples,
 
     auto tNetwork = std::chrono::steady_clock::now();
 
-    fprintf(stderr, "Vinput Qwen: HTTP %ld\n", httpCode);
-    fprintf(stderr, "Vinput Qwen: response bytes=%zu\n", respBody.size());
+    fprintf(stderr, "Ainput Qwen: HTTP %ld\n", httpCode);
+    fprintf(stderr, "Ainput Qwen: response bytes=%zu\n", respBody.size());
 
     if (res != CURLE_OK) {
         if (cancel->load()) {
@@ -329,7 +329,7 @@ void QwenAsrProvider::processRecording(std::vector<int16_t> samples,
             });
             return;
         }
-        fprintf(stderr, "Vinput Qwen: transport failed, curl=%d (%s)\n",
+        fprintf(stderr, "Ainput Qwen: transport failed, curl=%d (%s)\n",
                 (int)res, curl_easy_strerror(res));
         evictCurlHandle();
         diagnosticLog().event("provider", "request_error", {
@@ -345,7 +345,7 @@ void QwenAsrProvider::processRecording(std::vector<int16_t> samples,
     }
     if (httpCode != 200) {
         std::string detail = qwenExtractErrorDetail(respBody);
-        fprintf(stderr, "Vinput Qwen: HTTP %ld error: %s\n", httpCode,
+        fprintf(stderr, "Ainput Qwen: HTTP %ld error: %s\n", httpCode,
                 detail.c_str());
         diagnosticLog().event("provider", "request_error", {
             {"provider", "qwen"}, {"recognition_id", std::to_string(diagnosticId)},
@@ -369,7 +369,7 @@ void QwenAsrProvider::processRecording(std::vector<int16_t> samples,
     std::string text = qwenExtractText(respBody);
 
     auto tParse = std::chrono::steady_clock::now();
-    fprintf(stderr, "Vinput Qwen [timer] encode=%ldms network=%ldms parse=%ldms text_len=%zu\n",
+    fprintf(stderr, "Ainput Qwen [timer] encode=%ldms network=%ldms parse=%ldms text_len=%zu\n",
             (long)std::chrono::duration_cast<std::chrono::milliseconds>(tEncode - t0).count(),
             (long)std::chrono::duration_cast<std::chrono::milliseconds>(tNetwork - tEncode).count(),
             (long)std::chrono::duration_cast<std::chrono::milliseconds>(tParse - tNetwork).count(),
@@ -432,4 +432,4 @@ static bool _qwenReg = []() {
     return true;
 }();
 
-} // namespace vinput
+} // namespace ainput

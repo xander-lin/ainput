@@ -11,7 +11,7 @@
 #include <cstdio>
 #include <string>
 
-namespace vinput {
+namespace ainput {
 
 inline void appendUtf8(std::string &out, uint32_t cp) {
     if (cp <= 0x7F) {
@@ -594,4 +594,4 @@ inline std::string qjsonSetSectionString(const std::string &json,
     return json.substr(0, obj + 1) + prop + (empty ? "" : ",") + json.substr(obj + 1);
 }
 
-} // namespace vinput
+} // namespace ainput

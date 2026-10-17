@@ -1,5 +1,5 @@
 {
-    "model_dir": "~/.local/share/vinput/models/sherpa-onnx-fire-red-asr2-zh_en-int8-2026-02-26",
+    "model_dir": "~/.local/share/ainput/models/sherpa-onnx-fire-red-asr2-zh_en-int8-2026-02-26",
     "timeout_sec": 120,
-    "bin_path": "~/.local/share/vinput/sherpa-onnx/bin/sherpa-onnx-offline"
+    "bin_path": "~/.local/share/ainput/sherpa-onnx/bin/sherpa-onnx-offline"
 }

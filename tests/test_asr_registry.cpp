@@ -11,8 +11,8 @@
 int main() {
     namespace fs = std::filesystem;
     const char *tmp = std::getenv("MESON_TEST_TMPDIR");
-    fs::path root = (tmp && *tmp) ? tmp : "/tmp/vinput-asr-registry";
-    fs::path cfgDir = root / ".config/vinput";
+    fs::path root = (tmp && *tmp) ? tmp : "/tmp/ainput-asr-registry";
+    fs::path cfgDir = root / ".config/ainput";
     fs::create_directories(cfgDir);
     setenv("HOME", root.c_str(), 1);
 
@@ -25,7 +25,7 @@ int main() {
         f << "{\"api_key\":\"k\",\"resource_id\":\"volc.seedasr.auc\",\"model_name\":\"bigmodel\"}\n";
     }
 
-    auto &registry = vinput::AsrProviderRegistry::instance();
+    auto &registry = ainput::AsrProviderRegistry::instance();
     auto factories = registry.listFactories();
 
     bool foundMock = false;

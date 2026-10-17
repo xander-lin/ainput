@@ -11,7 +11,7 @@
 #include <cstdint>
 #include "asr_provider.h"
 
-namespace vinput {
+namespace ainput {
 
 // Resolved from doubao.json (+ setConfig overrides) on the worker thread
 // before each request. Re-read per request so model/feature switches need no
@@ -78,4 +78,4 @@ public:
     std::unique_ptr<IAsrProvider> create() override;
 };
 
-} // namespace vinput
+} // namespace ainput

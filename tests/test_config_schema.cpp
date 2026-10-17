@@ -15,7 +15,7 @@ void check(bool ok, const std::string &what) {
     }
 }
 
-bool hasIssue(const std::vector<vinput::ConfigIssue> &issues,
+bool hasIssue(const std::vector<ainput::ConfigIssue> &issues,
               const std::string &needle, bool fatal) {
     for (const auto &issue : issues) {
         if (issue.fatal == fatal &&
@@ -27,93 +27,93 @@ bool hasIssue(const std::vector<vinput::ConfigIssue> &issues,
 }
 
 void testSyntax() {
-    check(vinput::qjsonSyntaxError("{\"a\": 1}").empty(), "valid object");
-    check(vinput::qjsonSyntaxError("{\"a\": \"x\", \"b\": [1, 2]}").empty(),
+    check(ainput::qjsonSyntaxError("{\"a\": 1}").empty(), "valid object");
+    check(ainput::qjsonSyntaxError("{\"a\": \"x\", \"b\": [1, 2]}").empty(),
           "nested values");
-    check(!vinput::qjsonSyntaxError("{\"a\": \"x\"").empty(),
+    check(!ainput::qjsonSyntaxError("{\"a\": \"x\"").empty(),
           "unterminated object");
-    check(!vinput::qjsonSyntaxError("{\"a\": 1,,}").empty(),
+    check(!ainput::qjsonSyntaxError("{\"a\": 1,,}").empty(),
           "double comma");
-    check(!vinput::qjsonSyntaxError("{\"a\" 1}").empty(),
+    check(!ainput::qjsonSyntaxError("{\"a\" 1}").empty(),
           "missing colon");
-    check(!vinput::qjsonSyntaxError("{\"a\": \"unterminated}").empty(),
+    check(!ainput::qjsonSyntaxError("{\"a\": \"unterminated}").empty(),
           "unterminated string");
-    check(!vinput::qjsonSyntaxError("[1, 2]").empty(),
+    check(!ainput::qjsonSyntaxError("[1, 2]").empty(),
           "root must be object");
-    check(!vinput::qjsonSyntaxError("{\"a\": 1} trailing").empty(),
+    check(!ainput::qjsonSyntaxError("{\"a\": 1} trailing").empty(),
           "trailing content");
-    check(vinput::qjsonSyntaxError("").empty() == false ||
-          vinput::qjsonSyntaxError("").size() > 0, "empty reported");
+    check(ainput::qjsonSyntaxError("").empty() == false ||
+          ainput::qjsonSyntaxError("").size() > 0, "empty reported");
     // Offset is reported for syntax errors.
-    auto issues = vinput::validateConfigJson("{\"model\": ", vinput::qwenConfigSchema());
+    auto issues = ainput::validateConfigJson("{\"model\": ", ainput::qwenConfigSchema());
     check(issues.size() == 1 && issues[0].fatal, "syntax issue is fatal");
     check(issues[0].message.find("offset") != std::string::npos,
           "syntax issue carries offset");
 }
 
 void testUnknownFields() {
-    auto issues = vinput::validateConfigJson(
-        "{\"api_key\": \"sk\", \"modelname\": \"x\"}", vinput::qwenConfigSchema());
+    auto issues = ainput::validateConfigJson(
+        "{\"api_key\": \"sk\", \"modelname\": \"x\"}", ainput::qwenConfigSchema());
     check(hasIssue(issues, "unknown field \"modelname\"", false),
           "unknown field reported");
     check(hasIssue(issues, "did you mean \"model\"", false),
           "typo suggestion offered");
 
-    issues = vinput::validateConfigJson(
-        "{\"api_key\": \"sk\", \"timeout\": 5}", vinput::qwenConfigSchema());
+    issues = ainput::validateConfigJson(
+        "{\"api_key\": \"sk\", \"timeout\": 5}", ainput::qwenConfigSchema());
     check(hasIssue(issues, "unknown field \"timeout\"", false),
           "prefix-only field flagged");
 
-    issues = vinput::validateConfigJson(
-        "{\"api_key\": \"sk\", \"enable_itn\": true}", vinput::qwenConfigSchema());
+    issues = ainput::validateConfigJson(
+        "{\"api_key\": \"sk\", \"enable_itn\": true}", ainput::qwenConfigSchema());
     check(hasIssue(issues, "enable_itn", false),
           "field from another vendor flagged in qwen schema");
 }
 
 void testTypeChecks() {
-    auto issues = vinput::validateConfigJson(
-        "{\"api_key\": \"sk\", \"timeout_sec\": \"abc\"}", vinput::qwenConfigSchema());
+    auto issues = ainput::validateConfigJson(
+        "{\"api_key\": \"sk\", \"timeout_sec\": \"abc\"}", ainput::qwenConfigSchema());
     check(hasIssue(issues, "\"timeout_sec\" expects an integer", false),
           "int type mismatch");
 
-    issues = vinput::validateConfigJson(
-        "{\"api_key\": \"sk\", \"keep_dialect\": \"yes\"}", vinput::qwenConfigSchema());
+    issues = ainput::validateConfigJson(
+        "{\"api_key\": \"sk\", \"keep_dialect\": \"yes\"}", ainput::qwenConfigSchema());
     check(hasIssue(issues, "\"keep_dialect\" expects true/false", false),
           "bool type mismatch");
 
-    issues = vinput::validateConfigJson(
-        "{\"api_key\": 42}", vinput::qwenConfigSchema());
+    issues = ainput::validateConfigJson(
+        "{\"api_key\": 42}", ainput::qwenConfigSchema());
     check(hasIssue(issues, "\"api_key\" expects a string", false),
           "string type mismatch");
 
-    issues = vinput::validateConfigJson(
-        "{\"api_key\": \"sk\", \"language_hints\": [\"zh\", 3]}", vinput::qwenConfigSchema());
+    issues = ainput::validateConfigJson(
+        "{\"api_key\": \"sk\", \"language_hints\": [\"zh\", 3]}", ainput::qwenConfigSchema());
     check(hasIssue(issues, "\"language_hints\" expects an array of strings", false),
           "array element type mismatch");
 
-    issues = vinput::validateConfigJson(
-        "{\"api_key\": \"sk\", \"vocabulary\": [1,2]}", vinput::qwenConfigSchema());
+    issues = ainput::validateConfigJson(
+        "{\"api_key\": \"sk\", \"vocabulary\": [1,2]}", ainput::qwenConfigSchema());
     check(hasIssue(issues, "\"vocabulary\" expects an object", false),
           "object type mismatch");
 
-    issues = vinput::validateConfigJson(
-        "{\"api_key\": \"sk\", \"timeout_sec\": 60}", vinput::qwenConfigSchema());
+    issues = ainput::validateConfigJson(
+        "{\"api_key\": \"sk\", \"timeout_sec\": 60}", ainput::qwenConfigSchema());
     check(issues.empty(), "valid qwen config passes");
 }
 
 void testRequired() {
-    auto issues = vinput::validateConfigJson("{\"model\": \"m\"}", vinput::qwenConfigSchema());
+    auto issues = ainput::validateConfigJson("{\"model\": \"m\"}", ainput::qwenConfigSchema());
     check(hasIssue(issues, "missing required field \"api_key\"", false),
           "missing api_key reported");
 
-    issues = vinput::validateConfigJson("{}", vinput::doubaoConfigSchema());
+    issues = ainput::validateConfigJson("{}", ainput::doubaoConfigSchema());
     check(hasIssue(issues, "missing required field \"api_key\"", false) &&
               hasIssue(issues, "missing required field \"resource_id\"", false),
           "doubao required fields reported");
 }
 
 void testTopLevelKeys() {
-    auto keys = vinput::qjsonTopLevelKeys(
+    auto keys = ainput::qjsonTopLevelKeys(
         "{\"a\": 1, \"nested\": {\"a\": 2, \"b\": 3}, \"c\": [{\"d\": 4}]}");
     check(keys == std::vector<std::string>({"a", "nested", "c"}),
           "top-level keys only, nested ignored");
@@ -123,51 +123,51 @@ void testSchemas() {
     // Every example file shipped in config/ must validate against its schema.
     struct Case {
         const char *file;
-        std::vector<vinput::ConfigField> schema;
+        std::vector<ainput::ConfigField> schema;
         std::vector<std::string> required; // fields that must parse
     };
     // zipformer and fire_red share the local-model schema.
-    auto local = vinput::localModelConfigSchema();
-    auto zip = vinput::validateConfigJson(
+    auto local = ainput::localModelConfigSchema();
+    auto zip = ainput::validateConfigJson(
         "{\"model_dir\": \"~/.local/x\", \"timeout_sec\": 120, "
         "\"bin_path\": \"~/.local/bin\"}", local);
     check(zip.empty(), "zipformer example validates");
 }
 
 void testNearest() {
-    auto schema = vinput::qwenConfigSchema();
-    check(vinput::nearestConfigField("modelname", schema) == "model",
+    auto schema = ainput::qwenConfigSchema();
+    check(ainput::nearestConfigField("modelname", schema) == "model",
           "modelname -> model");
-    check(vinput::nearestConfigField("timeout", schema) == "timeout_sec",
+    check(ainput::nearestConfigField("timeout", schema) == "timeout_sec",
           "timeout -> timeout_sec");
-    check(vinput::nearestConfigField("zzzzzzzz", schema).empty(),
+    check(ainput::nearestConfigField("zzzzzzzz", schema).empty(),
           "no suggestion for unrelated names");
 }
 
 void testPrunedFields() {
     // Tuning knobs retired from the schemas in the 2026-10 restructure must
     // now be flagged, so stale files tell the user they do nothing.
-    auto issues = vinput::validateConfigJson(
+    auto issues = ainput::validateConfigJson(
         "{\"api_key\": \"sk\", \"request_style\": \"legacy\"}",
-        vinput::qwenConfigSchema());
+        ainput::qwenConfigSchema());
     check(hasIssue(issues, "unknown field \"request_style\"", false),
           "qwen request_style retired");
 
-    issues = vinput::validateConfigJson(
+    issues = ainput::validateConfigJson(
         "{\"api_key\": \"k\", \"resource_id\": \"r\", \"max_polls\": 10}",
-        vinput::doubaoConfigSchema());
+        ainput::doubaoConfigSchema());
     check(hasIssue(issues, "unknown field \"max_polls\"", false),
           "doubao poll knobs retired");
 
-    issues = vinput::validateConfigJson(
+    issues = ainput::validateConfigJson(
         "{\"model_dir\": \"~/.local/x\", \"num_threads\": 4}",
-        vinput::localModelConfigSchema());
+        ainput::localModelConfigSchema());
     check(hasIssue(issues, "unknown field \"num_threads\"", false),
           "local num_threads retired");
 
-    issues = vinput::validateConfigJson(
+    issues = ainput::validateConfigJson(
         "{\"api_key\": \"k\", \"resource_id\": \"r\", \"timeout_sec\": 60}",
-        vinput::doubaoConfigSchema());
+        ainput::doubaoConfigSchema());
     check(issues.empty(), "doubao single timeout_sec accepted");
 }
 
@@ -178,7 +178,7 @@ void testConfigFileSections() {
         "    \"ui\": { \"activation_msec\": 300 },\n"
         "    \"audio\": { \"denoise\": \"speexdsp\", \"crest_threshold\": 0.0 }\n"
         "}\n";
-    check(vinput::validateConfigFileJson(good).empty(),
+    check(ainput::validateConfigFileJson(good).empty(),
           "valid config.json passes");
 
     // Unknown top-level key, unknown key inside [audio], bad type in [ui].
@@ -189,7 +189,7 @@ void testConfigFileSections() {
         "    \"audio\": { \"denois\": \"speexdsp\" },\n"
         "    \"ui\": { \"activation_msec\": \"soon\" }\n"
         "}\n";
-    auto issues = vinput::validateConfigFileJson(bad);
+    auto issues = ainput::validateConfigFileJson(bad);
     check(hasIssue(issues, "unknown field \"hotkey\"", false),
           "unknown top-level section flagged");
     check(hasIssue(issues, "[audio] unknown field \"denois\"", false),
@@ -200,13 +200,13 @@ void testConfigFileSections() {
           "ui section type mismatch");
 
     // Missing required top-level provider.
-    issues = vinput::validateConfigFileJson(
+    issues = ainput::validateConfigFileJson(
         "{\"ui\": {\"activation_msec\": 300}}");
     check(hasIssue(issues, "missing required field \"provider\"", false),
           "missing provider flagged");
 
     // Syntax error stays fatal for the whole file.
-    issues = vinput::validateConfigFileJson("{\"provider\": ");
+    issues = ainput::validateConfigFileJson("{\"provider\": ");
     check(issues.size() == 1 && issues[0].fatal,
           "config.json syntax error is fatal");
 }

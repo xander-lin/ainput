@@ -1,11 +1,11 @@
-.\" Man page for fcitx5-vinput
-.TH vinput 1 "2026-07-28" "0.1.0" "fcitx5-vinput"
+.\" Man page for fcitx5-ainput
+.TH ainput 1 "2026-07-28" "0.1.0" "fcitx5-ainput"
 .SH NAME
-fcitx5\-vinput \- voice input addon for fcitx5
+fcitx5\-ainput \- voice input addon for fcitx5
 .SH SYNOPSIS
 fcitx5 addon, loaded automatically. No standalone binary.
 .SH DESCRIPTION
-\fBfcitx5\-vinput\fP is a push-to-talk voice input addon for the fcitx5
+\fBfcitx5\-ainput\fP is a push-to-talk voice input addon for the fcitx5
 input method framework. It captures audio via PulseAudio, performs
 speech recognition through configurable ASR backends, and commits the
 recognized text to the active application.
@@ -23,7 +23,7 @@ application document.
 Start voice recording. Release to stop and transcribe.
 .PP
 Recording can start while an earlier cloud request is still recognizing.
-Vinput preserves recording and commit order and targets the input context that
+Ainput preserves recording and commit order and targets the input context that
 was active at the start of each recording. At most three recognitions,
 including the active one, are queued. A newer recording is discarded with an
 input-panel error when that limit is reached.
@@ -43,7 +43,7 @@ file. While holding CapsLock:
 .br
 \fB\(da / j\fP   \-\- next denoiser
 .SH CONFIGURATION
-Configuration files are stored in \fB~/.config/vinput/\fP.
+Configuration files are stored in \fB~/.config/ainput/\fP.
 Defaults are built into the code: files are optional and sparse.
 Every file supports // line comments.
 \fBconfig.json\fP, \fBqwen.json\fP and \fBdoubao.json\fP self-heal:
@@ -96,7 +96,7 @@ API key, ASR model, and recognition options for Alibaba DashScope
 \fBqwen.json\fP optional keys include \fBmodel\fP, \fBlanguage_hints\fP,
 \fBvocabulary\fP, \fBvocabulary_id\fP, \fBkeep_dialect\fP,
 \fBspeaker_diarization\fP and \fBtimeout_sec\fP; see
-/usr/share/doc/fcitx5-vinput/config/ for commented examples.
+/usr/share/doc/fcitx5-ainput/config/ for commented examples.
 .SS Optional (all defaults in code)
 .TP
 \fBzipformer.json\fP
@@ -133,7 +133,7 @@ PulseAudio capture
 .fi
 .RE
 .PP
-PulseAudio capture is asynchronous. On CapsLock release, Vinput returns
+PulseAudio capture is asynchronous. On CapsLock release, Ainput returns
 control to fcitx5 immediately, retains a short audio tail, then starts
 processing and recognition.
 .SH RELIABILITY
@@ -142,16 +142,16 @@ to be reused while preserving result order. Zipformer and FireRed intentionally
 run one local process per utterance.
 .SH FILES
 .TP
-.I ~/.config/vinput/
+.I ~/.config/ainput/
 Configuration directory.
 .TP
-.I ~/.config/vinput/pa_buffer.json
+.I ~/.config/ainput/pa_buffer.json
 Auto-detected PulseAudio buffer size (created automatically).
 .TP
-.I /usr/lib/fcitx5/vinput.so
+.I /usr/lib/fcitx5/ainput.so
 Addon shared library.
 .TP
-.I /usr/share/fcitx5/addon/vinput.conf
+.I /usr/share/fcitx5/addon/ainput.conf
 Addon manifest.
 .SH BUGS
 Report issues at the project repository.

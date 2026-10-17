@@ -10,7 +10,7 @@
 //   ./tail_loss_test -d                 检测硬件 burst 大小
 //
 // -b <bytes> 指定缓冲区大小（默认 64000）
-// -s 不带参数时自动从 ~/.config/vinput/pa_buffer.json 读取，否则用 64000
+// -s 不带参数时自动从 ~/.config/ainput/pa_buffer.json 读取，否则用 64000
 //
 // 输出: 每次 pa_simple_read 的耗时、累计samples、期望时长 vs 实际时长
 
@@ -40,7 +40,7 @@ static size_t gBufSize = 64000;  // 可被 -b 或配置文件覆盖
 static size_t loadBufFromConfig() {
     const char *home = getenv("HOME");
     if (!home) return 0;
-    std::string path = std::string(home) + "/.config/vinput/pa_buffer.json";
+    std::string path = std::string(home) + "/.config/ainput/pa_buffer.json";
     std::ifstream f(path);
     if (!f.is_open()) return 0;
     std::string content((std::istreambuf_iterator<char>(f)),
@@ -450,7 +450,7 @@ static void runDetect() {
     printf("\n=== Result ===\n");
     printf("Hardware burst: %zu bytes (%.1f s @16kHz)\n", maxBurst, maxBurst / 32000.0);
     printf("Recommended buffer: %zu bytes (%.3f s)\n", result, result / 32000.0);
-    printf("Config file: ~/.config/vinput/pa_buffer.json = {\"buffer_bytes\": %zu}\n", result);
+    printf("Config file: ~/.config/ainput/pa_buffer.json = {\"buffer_bytes\": %zu}\n", result);
 }
 
 int main(int argc, char **argv) {

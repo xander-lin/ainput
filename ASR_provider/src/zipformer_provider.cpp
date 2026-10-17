@@ -1,6 +1,6 @@
 #include "zipformer_provider.h"
 #include "config_schema.h"
-#include "vinput_config.h"
+#include "ainput_config.h"
 #include "diagnostic_log.h"
 
 #include <unistd.h>
@@ -18,7 +18,7 @@
 #include <string>
 #include <vector>
 
-namespace vinput {
+namespace ainput {
 
 // Threading knob retired from config; the default works for both local models.
 constexpr int kSherpaNumThreads = 30;
@@ -44,7 +44,7 @@ static std::string expandPath(const std::string &p) {
 }
 
 ZipformerAsrProvider::ZipformerAsrProvider()
-    : modelDir_("~/.local/share/vinput/models/zipformer-zh-en") {
+    : modelDir_("~/.local/share/ainput/models/zipformer-zh-en") {
     auto cfg = readConfigFile("zipformer.json");
     if (!cfg.empty()) {
         reportConfigIssues("zipformer", "zipformer.json",
@@ -112,7 +112,7 @@ void ZipformerAsrProvider::runTranscribe(const std::string &wav,
                 {"reason", "binary_missing"}
             });
             if (onE) onE("Zipformer: sherpa-onnx binary not found at " + sherpaBin +
-                         " (set bin_path in ~/.config/vinput/zipformer.json)",
+                         " (set bin_path in ~/.config/ainput/zipformer.json)",
                          AsrErrorCategory::LocalSetup);
             return;
         }
@@ -126,7 +126,7 @@ void ZipformerAsrProvider::runTranscribe(const std::string &wav,
                     {"reason", "model_file_missing"}
                 });
                 if (onE) onE("Zipformer: model file missing: " + full +
-                             " (set model_dir in ~/.config/vinput/zipformer.json)",
+                             " (set model_dir in ~/.config/ainput/zipformer.json)",
                              AsrErrorCategory::ModelNotFound);
                 return;
             }
@@ -239,7 +239,7 @@ void ZipformerAsrProvider::runTranscribe(const std::string &wav,
         close(pipefd[0]);
 
         if (!reaped) {
-            fprintf(stderr, "Vinput Zipformer: waitpid failed\n");
+            fprintf(stderr, "Ainput Zipformer: waitpid failed\n");
             unlink(wav.c_str());
             if (onE) onE("Zipformer: recognition failed (waitpid)",
                          AsrErrorCategory::Runtime);
@@ -249,7 +249,7 @@ void ZipformerAsrProvider::runTranscribe(const std::string &wav,
 
         if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
             int exitCode = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
-            fprintf(stderr, "Vinput Zipformer: child exit=%d\n", exitCode);
+            fprintf(stderr, "Ainput Zipformer: child exit=%d\n", exitCode);
             unlink(wav.c_str());
             std::string tail = lastOutputLine(output);
             diagnosticLog().event("provider", "request_error", {
@@ -273,7 +273,7 @@ void ZipformerAsrProvider::runTranscribe(const std::string &wav,
         }
 
         auto tParse = std::chrono::steady_clock::now();
-        fprintf(stderr, "Vinput Zipformer [timer] exec_total=%ldms parse=%ldms text_len=%zu\n",
+        fprintf(stderr, "Ainput Zipformer [timer] exec_total=%ldms parse=%ldms text_len=%zu\n",
                 (long)std::chrono::duration_cast<std::chrono::milliseconds>(tRecv - t0).count(),
                 (long)std::chrono::duration_cast<std::chrono::milliseconds>(tParse - tRecv).count(),
                 text.size());
@@ -305,7 +305,7 @@ std::unique_ptr<IAsrProvider> ZipformerAsrProviderFactory::create() {
 }
 
 std::string ZipformerAsrProviderFactory::displayName() const {
-    std::string dir = "~/.local/share/vinput/models/zipformer-zh-en";
+    std::string dir = "~/.local/share/ainput/models/zipformer-zh-en";
     std::string warning;
     std::string cfg = readConfigFile("zipformer.json");
     if (!cfg.empty()) {
@@ -326,4 +326,4 @@ static bool _zipReg = []() {
     return true;
 }();
 
-} // namespace vinput
+} // namespace ainput

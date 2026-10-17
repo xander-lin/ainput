@@ -1,4 +1,4 @@
-# fcitx5-vinput — found.md (lessons learned)
+# fcitx5-ainput — found.md (lessons learned)
 
 ## 1. Alibaba DashScope ASR model lifecycle (discovered 2026-10)
 
@@ -112,7 +112,7 @@
   file-layout-only; user-owned values inside the removed file were treated
   as disposable, which is correct only for untouched defaults.
 - **Correction**: Manually merged the user's values into
-  `~/.config/vinput/audio.json` and trashed the stale `advanced.json`.
+  `~/.config/ainput/audio.json` and trashed the stale `advanced.json`.
 - **Prevention**: When a breaking change removes or renames a config file,
   diff the user's file against the shipped example of the old version;
   anything that differs from the old default must be carried into the new
@@ -166,7 +166,7 @@
   after push-to-talk: press CapsLock, release, and the lock stayed on — while
   another machine (x19) running the same build was fine. Nothing in the code
   had changed; the regression had no visible date.
-- **Root cause**: `VinputAddon::revertCapsLock()` needs write access to
+- **Root cause**: `AinputAddon::revertCapsLock()` needs write access to
   `/dev/uinput` to inject a synthetic CapsLock press+release. `/dev/uinput` is
   a **static node** created by systemd-tmpfiles at boot and left at
   `0600 root:root` unless some udev rule chgrps it. The project never shipped
@@ -174,9 +174,9 @@
   rule (on x19 `ydotool`'s `80-uinput.rules` did it, and the login user
   happened to be in the `input` group). On x18 none of those packages were
   installed, `initUinput()` hit `open() = EACCES` and only logged
-  `Vinput: cannot open /dev/uinput` at INFO level — voice input still worked
+  `Ainput: cannot open /dev/uinput` at INFO level — voice input still worked
   perfectly, so the failure looked like "the fix mysteriously disappeared".
-- **Correction**: Shipped `udev/70-vinput-uinput.rules`
+- **Correction**: Shipped `udev/70-ainput-uinput.rules`
   (`KERNEL=="uinput", SUBSYSTEM=="misc", OPTIONS+="static_node=uinput",
   TAG+="uaccess"`), installed by meson into `lib/udev/rules.d`, plus a udev
   reload in `PKGBUILD.install`.

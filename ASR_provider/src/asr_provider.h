@@ -8,7 +8,7 @@
 #include <vector>
 #include <cstdint>
 
-namespace vinput {
+namespace ainput {
 
 using AsrResultCallback = std::function<void(const std::string &text, bool isFinal)>;
 
@@ -101,4 +101,4 @@ private:
     std::vector<std::unique_ptr<IAsrProviderFactory>> factories_;
 };
 
-} // namespace vinput
+} // namespace ainput

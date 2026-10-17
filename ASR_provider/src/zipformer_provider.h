@@ -8,7 +8,7 @@
 #include <cstdint>
 #include "asr_provider.h"
 
-namespace vinput {
+namespace ainput {
 
 class ZipformerAsrProvider : public IAsrProvider {
 public:
@@ -27,7 +27,7 @@ private:
                               uint64_t diagnosticId);
 
     std::string modelDir_;
-    std::string sherpaBin_ = "~/.local/share/vinput/sherpa-onnx/bin/sherpa-onnx";
+    std::string sherpaBin_ = "~/.local/share/ainput/sherpa-onnx/bin/sherpa-onnx";
     int timeoutSec_ = 120;
     std::shared_ptr<std::atomic_bool> cancel_ =
         std::make_shared<std::atomic_bool>(false);
@@ -43,4 +43,4 @@ public:
     std::unique_ptr<IAsrProvider> create() override;
 };
 
-} // namespace vinput
+} // namespace ainput

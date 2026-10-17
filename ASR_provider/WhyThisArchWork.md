@@ -8,7 +8,7 @@ It is not responsible for fcitx5 keyboard events, input context lookup, notifica
 
 ## Dependencies
 
-This module may depend on PulseAudio, libebur128, speexdsp, soxr, libcurl, local ASR binaries, and per-user configuration under `~/.config/vinput/`.
+This module may depend on PulseAudio, libebur128, speexdsp, soxr, libcurl, local ASR binaries, and per-user configuration under `~/.config/ainput/`.
 
 It must not depend on fcitx5 adapter types, compositor IPC APIs, or UI state owned by the adapter.
 
@@ -32,9 +32,9 @@ Recording and recognition are separated at a stable data boundary: `std::vector<
 
 `asr_provider_dep` declares the module's external library requirements, so consumers do not need to duplicate internal ASR dependencies to link correctly.
 
-Hardware buffer detection stores cached burst sizes by PulseAudio default source id in `~/.cache/vinput/pa_buffer.json` (state, not config). Devices with different burst behavior no longer share one `buffer_bytes` value, while the old single-value cache is migrated to the currently selected source on first use.
+Hardware buffer detection stores cached burst sizes by PulseAudio default source id in `~/.cache/ainput/pa_buffer.json` (state, not config). Devices with different burst behavior no longer share one `buffer_bytes` value, while the old single-value cache is migrated to the currently selected source on first use.
 
-Runtime configuration reads only `~/.config/vinput/*.json`; defaults are compiled in, so a fresh install works with zero config files and upgrades never need pacnew reconciliation. The earlier `/etc/vinput` fallback layer was removed in the 2026-10 restructure: it added a copy-on-first-read step, pacnew noise, and a test-isolation footgun (packaged placeholder credentials leaking into test runs) for a site-defaults feature a personal IME addon never used.
+Runtime configuration reads only `~/.config/ainput/*.json`; defaults are compiled in, so a fresh install works with zero config files and upgrades never need pacnew reconciliation. The earlier `/etc/vinput` fallback layer was removed in the 2026-10 restructure: it added a copy-on-first-read step, pacnew noise, and a test-isolation footgun (packaged placeholder credentials leaking into test runs) for a site-defaults feature a personal IME addon never used.
 
 ## Failure Modes
 

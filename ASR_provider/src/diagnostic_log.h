@@ -8,11 +8,11 @@
 #include <utility>
 #include <vector>
 
-#ifndef VINPUT_DIAGNOSTICS_ENABLED
-#define VINPUT_DIAGNOSTICS_ENABLED 0
+#ifndef AINPUT_DIAGNOSTICS_ENABLED
+#define AINPUT_DIAGNOSTICS_ENABLED 0
 #endif
 
-namespace vinput {
+namespace ainput {
 
 using DiagnosticFields = std::vector<std::pair<std::string, std::string>>;
 
@@ -68,4 +68,4 @@ std::string hashDiagnosticValue(std::string_view value);
 std::unique_ptr<IDiagnosticLog> makeDiagnosticLog();
 IDiagnosticLog &diagnosticLog();
 
-} // namespace vinput
+} // namespace ainput

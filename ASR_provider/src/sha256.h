@@ -6,7 +6,7 @@
 #include <string>
 #include <string_view>
 
-namespace vinput {
+namespace ainput {
 namespace sha256 {
 
 inline std::array<uint32_t, 8> initState() {
@@ -96,4 +96,4 @@ inline std::string hashHex(std::string_view value) {
 }
 
 } // namespace sha256
-} // namespace vinput
+} // namespace ainput

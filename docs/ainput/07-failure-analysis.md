@@ -1,4 +1,4 @@
-# Vinput 语音识别无响应及“重启 fcitx5 恢复”问题根因深度分析报告
+# Ainput 语音识别无响应及“重启 fcitx5 恢复”问题根因深度分析报告
 
 > **环境与场景说明**：
 > - 仅针对云端供应商（阿里千问 `qwen` 与 字节跳动豆包 `doubao`）。
@@ -21,14 +21,14 @@
 ## 1. 核心根因 1：`activeRecognition_` 任务调度死锁（最主要元凶）
 
 ### 代码位置
-- `adapter/src/vinput.cpp`
+- `adapter/src/ainput.cpp`
 - `ASR_provider/src/qwen_provider.cpp`
 - `ASR_provider/src/doubao_provider.cpp`
 
 ### 机制与设计缺陷
-为了支持连续录音流水线，Vinput 引入了单任务激活与请求队列机制：
+为了支持连续录音流水线，Ainput 引入了单任务激活与请求队列机制：
 ```cpp
-// adapter/src/vinput.cpp
+// adapter/src/ainput.cpp
 struct RecognitionRequest { ... };
 static constexpr size_t kMaxPendingRecognitions = 3;
 std::deque<RecognitionRequest> recognitionQueue_;
@@ -96,9 +96,9 @@ Qwen/Doubao 后台工作线程 (onResult_ / onError_)
 void OutputHandler::commitPending(Pending pending, const char *label) {
     auto *ic = instance_->inputContextManager().findByUUID(pending.targetUuid);
     if (!ic) {
-        FCITX_INFO() << "Vinput [" << label << "] no focused ic, drop"; // 致命：找不到上下文则直接静默丢弃！
+        FCITX_INFO() << "Ainput [" << label << "] no focused ic, drop"; // 致命：找不到上下文则直接静默丢弃！
     } else {
-        FCITX_INFO() << "Vinput [" << label << "] ic=" << ic
+        FCITX_INFO() << "Ainput [" << label << "] ic=" << ic
                      << " program=" << ic->program()
                      << " text=\"" << pending.text << "\"";
         if (!pending.text.empty()) ic->commitString(pending.text);
@@ -109,13 +109,13 @@ void OutputHandler::commitPending(Pending pending, const char *label) {
 
 ### 产生机制
 1. 云端识别（Qwen/Doubao）需要经历“音频编码 $\rightarrow$ 网络传输 $\rightarrow$ 云端大模型推理 $\rightarrow$ 结果轮询/接收”，全程通常需要 **0.5 秒 ~ 2 秒**。
-2. 录音开始时，Vinput 记录了当时的 `targetUuid = ic->uuid()`。
+2. 录音开始时，Ainput 记录了当时的 `targetUuid = ic->uuid()`。
 3. 在 Wayland 环境（Hyprland、Niri 等）下，若用户在说话或等待上屏的 1~2 秒内：
    - 切换了激活窗口；
    - 点击了同一窗口内的不同文本框；
    - 目标应用程序（如 Chrome、VSCode、微信、基于 WebKit/Electron 的应用）在焦点变动时**重新创建了 `text-input-v3` 上下文**。
 4. 此时，fcitx5 为该应用分配了全新的 UUID，`findByUUID(pending.targetUuid)` 返回 `nullptr`。
-5. **Vinput 直接执行丢弃逻辑（drop），没有任何 fallback 回退到当前焦点输入上下文（`instance_->mostRecentInputContext()`）的代码**。
+5. **Ainput 直接执行丢弃逻辑（drop），没有任何 fallback 回退到当前焦点输入上下文（`instance_->mostRecentInputContext()`）的代码**。
 6. 现象：云端识别完全成功，但文字被直接丢弃，用户体感为“识别不出来”。
 
 ---
@@ -123,7 +123,7 @@ void OutputHandler::commitPending(Pending pending, const char *label) {
 ## 3. 核心根因 3：按键去抖与状态机标志位错位（无法再次触发录音）
 
 ### 代码位置
-- `adapter/src/vinput.cpp`
+- `adapter/src/ainput.cpp`
 
 ### 关键代码片段
 ```cpp
@@ -261,7 +261,7 @@ bool AudioCapture::hasVoice(const std::vector<int16_t> &samples) {
    ```cpp
    else if (isBlank) {
        unlink(wavPath_.c_str());
-       if (onStatusText_) onStatusText_("Vinput: no speech detected");
+       if (onStatusText_) onStatusText_("Ainput: no speech detected");
    }
    ```
 3. **`onRecorded_` 未被触发**，临时 WAV 文件被直接删除，请求根本未发向阿里或豆包。状态栏短暂提示后静默结束，没有任何文字上屏。
@@ -274,9 +274,9 @@ bool AudioCapture::hasVoice(const std::vector<int16_t> &samples) {
 
 | 故障状态 | 驻留位置 | 重启 fcitx5 产生的作用 |
 | :--- | :--- | :--- |
-| `activeRecognition_` 死锁 | `VinputAddon` 实例成员 | 析构旧 Addon，重新构建，`activeRecognition_` 和请求队列重置为空 |
+| `activeRecognition_` 死锁 | `AinputAddon` 实例成员 | 析构旧 Addon，重新构建，`activeRecognition_` 和请求队列重置为空 |
 | `ProcessingTurn` 票据阻塞 | 匿名命名空间全局变量 | 进程重启，重置 `nextProcessingTicket = 0` 和 `nextProcessingId = 0` |
-| `revertDebounce_` / `active_` 错位 | `VinputAddon` 实例成员 | 重置按键状态机为初始状态（`active_ = false`, `debounce = 0`） |
+| `revertDebounce_` / `active_` 错位 | `AinputAddon` 实例成员 | 重置按键状态机为初始状态（`active_ = false`, `debounce = 0`） |
 | `OutputHandler` 管道与焦点上下文 | `OutputHandler` 实例 | 重建 pipe 管道与 event loop IO 事件监听，重新挂接 Compositor 焦点 |
 
 ---
@@ -285,7 +285,7 @@ bool AudioCapture::hasVoice(const std::vector<int16_t> &samples) {
 
 ### 建议 1：为 `activeRecognition_` 增加防御性超时与 Cancel 回调补全
 1. 在 `qwen_provider.cpp` 与 `doubao_provider.cpp` 中，凡是 `cancel->load()` 导致提前 `return` 的地方，必须确保触发回调（如调用 `onError_("canceled")`），保证 `finishRecognition()` 得到执行。
-2. 在 `VinputAddon` 中为当前执行的 recognition 增加超时定时器（如 10 秒）。超时未完成则强制调用 `finishRecognition()` 清空状态并推进队列。
+2. 在 `AinputAddon` 中为当前执行的 recognition 增加超时定时器（如 10 秒）。超时未完成则强制调用 `finishRecognition()` 清空状态并推进队列。
 
 ### 建议 2：`OutputHandler` 增加输入上下文 Fallback
 修改 `OutputHandler::commitPending`：
@@ -295,7 +295,7 @@ void OutputHandler::commitPending(Pending pending, const char *label) {
     if (!ic) {
         // Fallback: 如果原 UUID 失效，尝试提交给当前最新的激活输入上下文
         ic = instance_->mostRecentInputContext();
-        FCITX_INFO() << "Vinput [" << label << "] targetUuid lost, fallback to mostRecentInputContext: " << ic;
+        FCITX_INFO() << "Ainput [" << label << "] targetUuid lost, fallback to mostRecentInputContext: " << ic;
     }
     if (ic && !pending.text.empty()) {
         ic->commitString(pending.text);

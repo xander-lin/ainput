@@ -1,4 +1,4 @@
-# fcitx5-vinput — grant local users write access to /dev/uinput.
+# fcitx5-ainput — grant local users write access to /dev/uinput.
 #
 # The addon opens /dev/uinput once at load time to create a persistent virtual
 # keyboard, and injects a single synthetic CapsLock press+release after each

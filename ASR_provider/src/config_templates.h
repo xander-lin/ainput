@@ -1,14 +1,14 @@
 #pragma once
 
 // Template texts for the three seeded config files. Seeding is done by
-// readConfigFile() in vinput_config.h: whenever one of these files is found
+// readConfigFile() in ainput_config.h: whenever one of these files is found
 // missing, it is regenerated from its template (mode 0600). Users can move a
 // file away at any time and the next config read recreates the template.
 //
 // Constraints on the template text: after // comment stripping it must be
 // valid JSON (watch trailing commas) and pass its schema in config_schema.h.
 
-namespace vinput {
+namespace ainput {
 
 // Placeholder written into seeded credential files; providers treat it as
 // "not configured yet".
@@ -70,4 +70,4 @@ inline const char *doubaoJsonTemplate() {
 )JSON";
 }
 
-} // namespace vinput
+} // namespace ainput

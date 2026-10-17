@@ -222,7 +222,7 @@ int main(int argc, char **argv) {
     printf("\n如果当前阀值在本环境不合适:\n");
     printf("  - 背景噪声被误判为语音 → 提高 crest_threshold\n");
     printf("  - 实际语音被误判为静音 → 降低 crest_threshold\n");
-    printf("\n调整方法: 编辑 ~/.config/vinput/audio.json 中 crest_threshold 的值\n");
+    printf("\n调整方法: 编辑 ~/.config/ainput/audio.json 中 crest_threshold 的值\n");
 
     return 0;
 }

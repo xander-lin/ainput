@@ -1,6 +1,6 @@
 #include "fire_red_provider.h"
 #include "config_schema.h"
-#include "vinput_config.h"
+#include "ainput_config.h"
 #include "diagnostic_log.h"
 
 #include <unistd.h>
@@ -18,7 +18,7 @@
 #include <string>
 #include <vector>
 
-namespace vinput {
+namespace ainput {
 
 // Threading knob retired from config; the default works for both local models.
 constexpr int kSherpaNumThreads = 30;
@@ -44,7 +44,7 @@ static std::string expandPath(const std::string &p) {
 }
 
 FireRedAsrProvider::FireRedAsrProvider()
-    : modelDir_("~/.local/share/vinput/models/sherpa-onnx-fire-red-asr2-zh_en-int8-2026-02-26") {
+    : modelDir_("~/.local/share/ainput/models/sherpa-onnx-fire-red-asr2-zh_en-int8-2026-02-26") {
     auto cfg = readConfigFile("fire_red.json");
     if (!cfg.empty()) {
         reportConfigIssues("fire_red", "fire_red.json",
@@ -112,7 +112,7 @@ void FireRedAsrProvider::runTranscribe(const std::string &wav,
                 {"reason", "binary_missing"}
             });
             if (onE) onE("FireRed: sherpa-onnx-offline binary not found at " + sherpaBin +
-                         " (set bin_path in ~/.config/vinput/fire_red.json)",
+                         " (set bin_path in ~/.config/ainput/fire_red.json)",
                          AsrErrorCategory::LocalSetup);
             return;
         }
@@ -125,7 +125,7 @@ void FireRedAsrProvider::runTranscribe(const std::string &wav,
                     {"reason", "model_file_missing"}
                 });
                 if (onE) onE("FireRed: model file missing: " + full +
-                             " (set model_dir in ~/.config/vinput/fire_red.json)",
+                             " (set model_dir in ~/.config/ainput/fire_red.json)",
                              AsrErrorCategory::ModelNotFound);
                 return;
             }
@@ -236,7 +236,7 @@ void FireRedAsrProvider::runTranscribe(const std::string &wav,
         close(pipefd[0]);
 
         if (!reaped) {
-            fprintf(stderr, "Vinput FireRed: waitpid failed\n");
+            fprintf(stderr, "Ainput FireRed: waitpid failed\n");
             unlink(wav.c_str());
             if (onE) onE("FireRed: recognition failed (waitpid)",
                          AsrErrorCategory::Runtime);
@@ -246,7 +246,7 @@ void FireRedAsrProvider::runTranscribe(const std::string &wav,
 
         if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
             int exitCode = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
-            fprintf(stderr, "Vinput FireRed: child exit=%d\n", exitCode);
+            fprintf(stderr, "Ainput FireRed: child exit=%d\n", exitCode);
             unlink(wav.c_str());
             std::string tail = lastOutputLine(output);
             diagnosticLog().event("provider", "request_error", {
@@ -270,7 +270,7 @@ void FireRedAsrProvider::runTranscribe(const std::string &wav,
         }
 
         auto tParse = std::chrono::steady_clock::now();
-        fprintf(stderr, "Vinput FireRed [timer] exec_total=%ldms parse=%ldms text_len=%zu\n",
+        fprintf(stderr, "Ainput FireRed [timer] exec_total=%ldms parse=%ldms text_len=%zu\n",
                 (long)std::chrono::duration_cast<std::chrono::milliseconds>(tRecv - t0).count(),
                 (long)std::chrono::duration_cast<std::chrono::milliseconds>(tParse - tRecv).count(),
                 text.size());
@@ -302,7 +302,7 @@ std::unique_ptr<IAsrProvider> FireRedAsrProviderFactory::create() {
 }
 
 std::string FireRedAsrProviderFactory::displayName() const {
-    std::string dir = "~/.local/share/vinput/models/sherpa-onnx-fire-red-asr2-zh_en-int8-2026-02-26";
+    std::string dir = "~/.local/share/ainput/models/sherpa-onnx-fire-red-asr2-zh_en-int8-2026-02-26";
     std::string warning;
     std::string cfg = readConfigFile("fire_red.json");
     if (!cfg.empty()) {
@@ -323,4 +323,4 @@ static bool _frReg = []() {
     return true;
 }();
 
-} // namespace vinput
+} // namespace ainput

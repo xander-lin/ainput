@@ -10,7 +10,7 @@ namespace {
 std::string tempConfigPath() {
     const char *tmp = std::getenv("MESON_TEST_TMPDIR");
     if (!tmp || !*tmp) tmp = "/tmp";
-    return std::string(tmp) + "/vinput-pa-buffer-test.json";
+    return std::string(tmp) + "/ainput-pa-buffer-test.json";
 }
 
 std::string readFile(const std::string &path) {
@@ -31,10 +31,10 @@ int main() {
         f << "{\"buffer_bytes\": 64000}\n";
     }
 
-    setenv("VINPUT_PA_BUFFER_CONFIG", path.c_str(), 1);
-    setenv("VINPUT_PA_SOURCE_ID", "alsa_input.usb-CX31993.analog-stereo", 1);
+    setenv("AINPUT_PA_BUFFER_CONFIG", path.c_str(), 1);
+    setenv("AINPUT_PA_SOURCE_ID", "alsa_input.usb-CX31993.analog-stereo", 1);
 
-    size_t migrated = vinput::loadOrDetectBufferBytes();
+    size_t migrated = ainput::loadOrDetectBufferBytes();
     if (migrated != 64000) {
         std::cerr << "legacy cache was not migrated for first device\n";
         return 1;
@@ -50,8 +50,8 @@ int main() {
           << "}\n";
     }
 
-    setenv("VINPUT_PA_SOURCE_ID", "alsa_input.pci-0000_00_1f.3.analog-stereo", 1);
-    size_t secondDevice = vinput::loadOrDetectBufferBytes();
+    setenv("AINPUT_PA_SOURCE_ID", "alsa_input.pci-0000_00_1f.3.analog-stereo", 1);
+    size_t secondDevice = ainput::loadOrDetectBufferBytes();
     if (secondDevice != 16384) {
         std::cerr << "second device did not use its own cached buffer\n";
         return 1;

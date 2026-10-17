@@ -11,7 +11,7 @@
 #include <cstdint>
 #include "asr_provider.h"
 
-namespace vinput {
+namespace ainput {
 
 // Everything the Qwen request needs, resolved from qwen.json (+ setConfig
 // overrides) on the worker thread right before each request. The config file
@@ -79,4 +79,4 @@ public:
     std::unique_ptr<IAsrProvider> create() override;
 };
 
-} // namespace vinput
+} // namespace ainput

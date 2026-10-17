@@ -40,8 +40,8 @@ int main(int argc, char **argv) {
             argv[1], argv[2], denoiser.c_str(), samples.size());
 
     auto t0 = std::chrono::steady_clock::now();
-    vinput::AudioCapture::processSamples(samples, denoiser);
-    vinput::AudioCapture::writeWav(samples, argv[2]);
+    ainput::AudioCapture::processSamples(samples, denoiser);
+    ainput::AudioCapture::writeWav(samples, argv[2]);
     auto t1 = std::chrono::steady_clock::now();
 
     fprintf(stderr, "Done: %s (%zu samples, %ldms)\n",

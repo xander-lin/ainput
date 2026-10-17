@@ -28,7 +28,7 @@ bool testProvider(const std::filesystem::path &root, const std::string &name) {
         auto path = root / (name + "-" + std::to_string(i) + ".wav");
         std::ofstream(path) << "placeholder";
         paths.push_back(path);
-        provider.setErrorCallback([&, i](const std::string &, vinput::AsrErrorCategory) {
+        provider.setErrorCallback([&, i](const std::string &, ainput::AsrErrorCategory) {
             std::lock_guard<std::mutex> lock(mutex);
             order.push_back(i);
             threads.push_back(std::this_thread::get_id());
@@ -85,22 +85,22 @@ bool testQueuedCleanup(const std::filesystem::path &root,
 int main() {
     namespace fs = std::filesystem;
     const char *tmp = std::getenv("MESON_TEST_TMPDIR");
-    fs::path root = (tmp && *tmp) ? tmp : "/tmp/vinput-cloud-provider-queue";
-    fs::create_directories(root / ".config/vinput");
+    fs::path root = (tmp && *tmp) ? tmp : "/tmp/ainput-cloud-provider-queue";
+    fs::create_directories(root / ".config/ainput");
     setenv("HOME", root.c_str(), 1);
     // Pin configs to this sandbox (the developer\'s real
-    // ~/.config/vinput would otherwise carry a live api_key).
+    // ~/.config/ainput would otherwise carry a live api_key).
     {
-        std::ofstream q(root / ".config/vinput/qwen.json");
+        std::ofstream q(root / ".config/ainput/qwen.json");
         q << "{\"api_key\":\"\",\"endpoint\":\"http://127.0.0.1:1/x\"}\n";
-        std::ofstream d(root / ".config/vinput/doubao.json");
+        std::ofstream d(root / ".config/ainput/doubao.json");
         d << "{\"api_key\":\"\",\"resource_id\":\"\"}\n";
     }
 
-    return testProvider<vinput::DoubaoAsrProvider>(root, "doubao") &&
-                   testProvider<vinput::QwenAsrProvider>(root, "qwen") &&
-                   testQueuedCleanup<vinput::DoubaoAsrProvider>(root, "doubao") &&
-                   testQueuedCleanup<vinput::QwenAsrProvider>(root, "qwen")
+    return testProvider<ainput::DoubaoAsrProvider>(root, "doubao") &&
+                   testProvider<ainput::QwenAsrProvider>(root, "qwen") &&
+                   testQueuedCleanup<ainput::DoubaoAsrProvider>(root, "doubao") &&
+                   testQueuedCleanup<ainput::QwenAsrProvider>(root, "qwen")
                ? 0
                : 1;
 }

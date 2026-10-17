@@ -1,6 +1,6 @@
 #include "output_handler.h"
 #include "diagnostic_log.h"
-#include "vinput_config.h"
+#include "ainput_config.h"
 
 #include <fcitx/inputpanel.h>
 #include <fcitx/inputcontextmanager.h>
@@ -13,7 +13,7 @@
 #include <cstdlib>
 #include <stdexcept>
 
-namespace vinput {
+namespace ainput {
 
 namespace {
 
@@ -26,7 +26,7 @@ std::string diagnosticUuid(const fcitx::ICUUID &uuid) {
 
 OutputHandler::OutputHandler(fcitx::Instance *instance) : instance_(instance) {
     if (pipe(wakePipe_) != 0) {
-        throw std::runtime_error("Vinput: OutputHandler pipe() failed");
+        throw std::runtime_error("Ainput: OutputHandler pipe() failed");
     }
     fcntl(wakePipe_[0], F_SETFL, O_NONBLOCK);
     fcntl(wakePipe_[1], F_SETFL, O_NONBLOCK);
@@ -41,7 +41,7 @@ OutputHandler::OutputHandler(fcitx::Instance *instance) : instance_(instance) {
         close(wakePipe_[0]);
         close(wakePipe_[1]);
         wakePipe_[0] = wakePipe_[1] = -1;
-        throw std::runtime_error("Vinput: failed to create output event source");
+        throw std::runtime_error("Ainput: failed to create output event source");
     }
 }
 
@@ -146,14 +146,14 @@ void OutputHandler::commitPending(Pending pending, const char *label) {
             {"target_uuid", diagnosticUuid(pending.targetUuid)},
             {"text_length", std::to_string(pending.text.size())}
         });
-        FCITX_INFO() << "Vinput [" << label << "] no focused ic, drop";
+        FCITX_INFO() << "Ainput [" << label << "] no focused ic, drop";
     } else {
         diagnosticLog().event("output", "commit_context_found", {
             {"recognition_id", std::to_string(pending.recognitionId)},
             {"target_uuid", diagnosticUuid(pending.targetUuid)},
             {"text_length", std::to_string(pending.text.size())}
         });
-        FCITX_INFO() << "Vinput [" << label << "] ic=" << ic
+        FCITX_INFO() << "Ainput [" << label << "] ic=" << ic
                      << " program=" << ic->program()
                      << " text_len=" << pending.text.size();
         if (!pending.text.empty()) ic->commitString(pending.text);
@@ -161,4 +161,4 @@ void OutputHandler::commitPending(Pending pending, const char *label) {
     if (pending.completion) pending.completion();
 }
 
-} // namespace vinput
+} // namespace ainput

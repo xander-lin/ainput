@@ -1,6 +1,6 @@
 #include "audio_capture.h"
 #include "config_schema.h"
-#include "vinput_config.h"
+#include "ainput_config.h"
 #include "diagnostic_log.h"
 
 #include <pulse/mainloop.h>
@@ -20,7 +20,7 @@
 #include <ebur128.h>
 #include <cstdlib>
 
-namespace vinput {
+namespace ainput {
 
 namespace {
 std::atomic<uint64_t> nextCaptureId{0};
@@ -85,7 +85,7 @@ static void loadAudioConfig(std::string &denoiseMethod) {
 AudioCapture::AudioCapture() {
     loadAudioConfig(denoiseMethod_);
     if (!denoiseMethod_.empty())
-        fprintf(stderr, "Vinput Capture: denoise=%s\n", denoiseMethod_.c_str());
+        fprintf(stderr, "Ainput Capture: denoise=%s\n", denoiseMethod_.c_str());
     diagnosticLog().event("audio", "capture_created", {
         {"denoiser", denoiseMethod_.empty() ? "none" : denoiseMethod_}
     });
@@ -100,10 +100,10 @@ AudioCapture::AudioCapture() {
             if (t > -100.0 && t < 0.0) lufsTarget_ = t;
             speexLevel_ = jsonInt(cfg, "speex_level", speexLevel_);
             crestThreshold_ = jsonDouble(cfg, "crest_threshold", crestThreshold_);
-            fprintf(stderr, "Vinput Capture: config.json [audio] parsed: crest_threshold=%.2f lufs_target=%.1f speex_level=%d\n",
+            fprintf(stderr, "Ainput Capture: config.json [audio] parsed: crest_threshold=%.2f lufs_target=%.1f speex_level=%d\n",
                     crestThreshold_, lufsTarget_, speexLevel_);
         } else {
-            fprintf(stderr, "Vinput Capture: config.json [audio] absent, using defaults\n");
+            fprintf(stderr, "Ainput Capture: config.json [audio] absent, using defaults\n");
         }
         configLoaded = true;
     }
@@ -126,7 +126,7 @@ void AudioCapture::processSamples(std::vector<int16_t> &samples, const std::stri
     trimSilence(samples);
 
     auto t1 = std::chrono::steady_clock::now();
-    fprintf(stderr, "Vinput Pipeline [summary] loudness=%.1f isBlank=%d denoiser=%s time=%ldms samples=%zu\n",
+    fprintf(stderr, "Ainput Pipeline [summary] loudness=%.1f isBlank=%d denoiser=%s time=%ldms samples=%zu\n",
             loudness, (int)isBlank, denoiser.c_str(),
             (long)std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count(),
             samples.size());
@@ -141,7 +141,7 @@ void AudioCapture::start() {
     stopRequested_ = false;
     finished_ = false;
     captureId_ = nextCaptureId.fetch_add(1);
-    wavPath_ = "/tmp/vinput_cap_" + std::to_string(getpid()) + "_" +
+    wavPath_ = "/tmp/ainput_cap_" + std::to_string(getpid()) + "_" +
                std::to_string(captureId_) + ".wav";
     diagnosticLog().event("audio", "capture_start", {
         {"recognition_id", std::to_string(diagnosticId_)},
@@ -217,7 +217,7 @@ void AudioCapture::recordLoop() {
             std::lock_guard<std::mutex> lock(pulseMutex_);
             pulseMainloop_ = mainloop;
         }
-        context = pa_context_new(pa_mainloop_get_api(mainloop), "vinput-cap");
+        context = pa_context_new(pa_mainloop_get_api(mainloop), "ainput-cap");
         if (!context) {
             readFailed = true;
         } else {
@@ -313,7 +313,7 @@ void AudioCapture::recordLoop() {
 
     if (onState_) onState_(false);
 
-    fprintf(stderr, "Vinput Capture [timer] pa_open=%ldms record=%ldms pa_close=%ldms events=%d samples=%zu\n",
+    fprintf(stderr, "Ainput Capture [timer] pa_open=%ldms record=%ldms pa_close=%ldms events=%d samples=%zu\n",
             (long)std::chrono::duration_cast<std::chrono::milliseconds>(tPaOpen - t0).count(),
             (long)std::chrono::duration_cast<std::chrono::milliseconds>(tRecordEnd - tPaOpen).count(),
             (long)std::chrono::duration_cast<std::chrono::milliseconds>(tPaClose - tRecordEnd).count(),
@@ -325,8 +325,8 @@ void AudioCapture::recordLoop() {
             {"capture_id", std::to_string(captureId_)},
             {"error_code", std::to_string(error)}
         });
-        fprintf(stderr, "Vinput Capture: read error: %s\n", pa_strerror(error));
-        if (onStatusText_) onStatusText_("Vinput: microphone read failed");
+        fprintf(stderr, "Ainput Capture: read error: %s\n", pa_strerror(error));
+        if (onStatusText_) onStatusText_("Ainput: microphone read failed");
         std::lock_guard<std::mutex> lk(sampleMutex_);
         samples_.clear();
         unlink(wavPath_.c_str());
@@ -374,12 +374,12 @@ void AudioCapture::recordLoop() {
                 {"voice", "false"}
             });
             unlink(wavPath_.c_str());
-            if (onStatusText_) onStatusText_("Vinput: no speech detected");
+            if (onStatusText_) onStatusText_("Ainput: no speech detected");
         } else {
             unlink(wavPath_.c_str());
         }
 
-        fprintf(stderr, "Vinput Capture [pipeline] loudness=%.1f isBlank=%d denoiser=%s samples=%zu\n",
+        fprintf(stderr, "Ainput Capture [pipeline] loudness=%.1f isBlank=%d denoiser=%s samples=%zu\n",
                 loudness, (int)isBlank, denoiseMethod_.c_str(), batch.size());
 
         {
@@ -391,7 +391,7 @@ void AudioCapture::recordLoop() {
             {"recognition_id", std::to_string(diagnosticId_)},
             {"capture_id", std::to_string(captureId_)}
         });
-        onStatusText_("Vinput: no audio captured");
+        onStatusText_("Ainput: no audio captured");
     }
     size_t finalSampleCount = 0;
     {
@@ -440,7 +440,7 @@ void AudioCapture::applyDenoise(std::vector<int16_t> &samples, const std::string
     speex_preprocess_state_destroy(st);
 
     auto t1 = std::chrono::steady_clock::now();
-    fprintf(stderr, "Vinput Capture [timer] denoise=%ldms samples=%zu\n",
+    fprintf(stderr, "Ainput Capture [timer] denoise=%ldms samples=%zu\n",
             (long)std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count(),
             samples.size());
 }
@@ -454,14 +454,14 @@ void AudioCapture::dfDenoise(std::vector<int16_t> &samples) {
     static bool daemonStartFailed = false;
     if (!daemonPipe && !daemonStartFailed) {
         std::string cmd = std::string(getenv("HOME") ? getenv("HOME") : "/tmp")
-                          + "/.local/share/vinput/bin/deep-filter"
+                          + "/.local/share/ainput/bin/deep-filter"
                           + " --stay -D -o /tmp 2>/dev/null";
         daemonPipe = popen(cmd.c_str(), "w");
         if (daemonPipe) {
-            fprintf(stderr, "Vinput DF: daemon started\n");
+            fprintf(stderr, "Ainput DF: daemon started\n");
             setvbuf(daemonPipe, nullptr, _IONBF, 0);
         } else {
-            fprintf(stderr, "Vinput DF: daemon start failed, falling back to one-shot\n");
+            fprintf(stderr, "Ainput DF: daemon start failed, falling back to one-shot\n");
             daemonStartFailed = true;
         }
     }
@@ -477,20 +477,20 @@ void AudioCapture::dfDenoise(std::vector<int16_t> &samples) {
     std::vector<float> fout(outLen48k);
     soxr_error_t err;
     soxr_t resampler = soxr_create(16000, 48000, 1, &err, nullptr, nullptr, nullptr);
-    if (err) { fprintf(stderr, "Vinput DF: soxr create error\n"); return; }
+    if (err) { fprintf(stderr, "Ainput DF: soxr create error\n"); return; }
 
     size_t consumed, generated;
     err = soxr_process(resampler, fin.data(), fin.size(), &consumed,
                        fout.data(), fout.size(), &generated);
     soxr_delete(resampler);
-    if (err) { fprintf(stderr, "Vinput DF: soxr process error\n"); return; }
+    if (err) { fprintf(stderr, "Ainput DF: soxr process error\n"); return; }
 
     std::vector<int16_t> samples48k(generated);
     for (size_t i = 0; i < generated; i++)
         samples48k[i] = (int16_t)std::clamp((int)(fout[i] * 32768.0f), -32768, 32767);
 
     // Write 48kHz WAV temp
-    std::string tmp48k = "/tmp/vinput_df_" + std::to_string(getpid()) + "_48k.wav";
+    std::string tmp48k = "/tmp/ainput_df_" + std::to_string(getpid()) + "_48k.wav";
     writeWav(samples48k, tmp48k);
 
     if (daemonPipe) {
@@ -506,7 +506,7 @@ void AudioCapture::dfDenoise(std::vector<int16_t> &samples) {
     } else {
         // Fallback: one-shot mode
         std::string cmd = std::string(getenv("HOME") ? getenv("HOME") : "/tmp")
-                          + "/.local/share/vinput/bin/deep-filter"
+                          + "/.local/share/ainput/bin/deep-filter"
                           + " -D -o /tmp " + tmp48k + " 2>/dev/null";
         (void)!std::system(cmd.c_str());
     }
@@ -518,7 +518,7 @@ void AudioCapture::dfDenoise(std::vector<int16_t> &samples) {
             f.seekg(0, std::ios::end);
             size_t size = f.tellg();
             if (size < 44) {
-                fprintf(stderr, "Vinput DF: processed file too small (%zu bytes)\n", size);
+                fprintf(stderr, "Ainput DF: processed file too small (%zu bytes)\n", size);
                 unlink(tmp48k.c_str());
                 return;
             }
@@ -544,14 +544,14 @@ void AudioCapture::dfDenoise(std::vector<int16_t> &samples) {
                            f16k.data(), f16k.size(), &generated);
         soxr_delete(resampler);
     }
-    if (err) { fprintf(stderr, "Vinput DF: soxr downsample error\n"); return; }
+    if (err) { fprintf(stderr, "Ainput DF: soxr downsample error\n"); return; }
 
     samples.resize(generated);
     for (size_t i = 0; i < generated; i++)
         samples[i] = (int16_t)std::clamp((int)(f16k[i] * 32768.0f), -32768, 32767);
 
     auto t1 = std::chrono::steady_clock::now();
-    fprintf(stderr, "Vinput Capture [timer] df_denoise=%ldms samples=%zu\n",
+    fprintf(stderr, "Ainput Capture [timer] df_denoise=%ldms samples=%zu\n",
             (long)std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count(),
             samples.size());
 }
@@ -572,7 +572,7 @@ double AudioCapture::normalizeSamples(std::vector<int16_t> &samples) {
 
     double gain;
     if (loudness < -70.0 || !std::isfinite(loudness)) {
-        fprintf(stderr, "Vinput Capture: audio too quiet (%.1f LUFS), skip norm\n", loudness);
+        fprintf(stderr, "Ainput Capture: audio too quiet (%.1f LUFS), skip norm\n", loudness);
         gain = 1.0;
     } else {
         gain = std::pow(10.0, (lufsTarget_ - loudness) / 20.0);
@@ -588,7 +588,7 @@ double AudioCapture::normalizeSamples(std::vector<int16_t> &samples) {
     }
 
     auto tGain = std::chrono::steady_clock::now();
-    fprintf(stderr, "Vinput Capture [timer] ebur128=%ldms gain=%ldms loudness=%.1f gain=%.2f\n",
+    fprintf(stderr, "Ainput Capture [timer] ebur128=%ldms gain=%ldms loudness=%.1f gain=%.2f\n",
             (long)std::chrono::duration_cast<std::chrono::milliseconds>(tEbur - t0).count(),
             (long)std::chrono::duration_cast<std::chrono::milliseconds>(tGain - tEbur).count(),
             loudness, gain);
@@ -610,7 +610,7 @@ bool AudioCapture::hasVoice(const std::vector<int16_t> &samples) {
 
     double rms = std::sqrt(sumSq / samples.size());
     double crestFactor = (double)peak / (rms > 0 ? rms : 1);
-    fprintf(stderr, "Vinput Capture: crestFactor=%.2f crestThreshold_=%.2f peak=%d rms=%.2f %s\n",
+    fprintf(stderr, "Ainput Capture: crestFactor=%.2f crestThreshold_=%.2f peak=%d rms=%.2f %s\n",
             crestFactor, crestThreshold_, (int)peak, rms,
             crestFactor < crestThreshold_ ? "SILENCE (crest below threshold)" : "HAS VOICE (crest passes)");
     if (crestFactor < crestThreshold_) return false;
@@ -647,7 +647,7 @@ bool AudioCapture::hasVoice(const std::vector<int16_t> &samples) {
     speex_preprocess_state_destroy(st);
 
     double ratio = frameCount > 0 ? (double)voiceCount / frameCount : 0;
-    fprintf(stderr, "Vinput Capture: VAD crest=%.1f peak=%d voiceCount=%zu/%zu (%.1f%%)\n",
+    fprintf(stderr, "Ainput Capture: VAD crest=%.1f peak=%d voiceCount=%zu/%zu (%.1f%%)\n",
             crestFactor, (int)peak, voiceCount, frameCount, ratio * 100);
 
     if (voiceCount < kMinVoiceFrames) return false;
@@ -708,7 +708,7 @@ void AudioCapture::trimSilence(std::vector<int16_t> &samples) {
         samples.erase(samples.begin() + shiftedEnd, samples.end());
     }
 
-    fprintf(stderr, "Vinput Capture: trimmed %zu leading + %zu trailing samples (orig=%zu now=%zu)\n",
+    fprintf(stderr, "Ainput Capture: trimmed %zu leading + %zu trailing samples (orig=%zu now=%zu)\n",
             trimStart, origSize - trimEnd, origSize, samples.size());
 }
 
@@ -717,7 +717,7 @@ void AudioCapture::writeWav(const std::vector<int16_t> &samples, const std::stri
 
     FILE *f = fopen(path.c_str(), "wb");
     if (!f) {
-        fprintf(stderr, "Vinput Capture: cannot write WAV to %s\n", path.c_str());
+        fprintf(stderr, "Ainput Capture: cannot write WAV to %s\n", path.c_str());
         return;
     }
 
@@ -740,8 +740,8 @@ void AudioCapture::writeWav(const std::vector<int16_t> &samples, const std::stri
     fclose(f);
 
     auto tWav = std::chrono::steady_clock::now();
-    fprintf(stderr, "Vinput Capture [timer] wav_write=%ldms\n",
+    fprintf(stderr, "Ainput Capture [timer] wav_write=%ldms\n",
             (long)std::chrono::duration_cast<std::chrono::milliseconds>(tWav - t0).count());
 }
 
-} // namespace vinput
+} // namespace ainput

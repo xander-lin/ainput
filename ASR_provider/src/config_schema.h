@@ -14,7 +14,7 @@
 
 #include "qwen_json.h"
 
-namespace vinput {
+namespace ainput {
 
 enum class ConfigFieldType { String, Int, Double, Bool, StringArray, Object };
 
@@ -341,8 +341,8 @@ inline std::vector<ConfigIssue> validateConfigJson(
 }
 
 // Shared schemas for the config files. Layout (since 2026-10):
-//   ~/.config/vinput/config.json  — provider selection + "ui" + "audio"
-//   ~/.config/vinput/<provider>.json — qwen / doubao / zipformer / fire_red
+//   ~/.config/ainput/config.json  — provider selection + "ui" + "audio"
+//   ~/.config/ainput/<provider>.json — qwen / doubao / zipformer / fire_red
 inline std::vector<ConfigField> configFileSchema() {
     return {
         {"provider", ConfigFieldType::String, true},
@@ -430,7 +430,7 @@ inline void reportConfigIssues(const std::string &owner,
                                const std::string &file,
                                const std::vector<ConfigIssue> &issues) {
     for (const auto &issue : issues) {
-        fprintf(stderr, "Vinput %s: %s: %s%s\n", owner.c_str(), file.c_str(),
+        fprintf(stderr, "Ainput %s: %s: %s%s\n", owner.c_str(), file.c_str(),
                 issue.fatal ? "JSON syntax error: " : "config warning: ",
                 issue.message.c_str());
     }
@@ -443,4 +443,4 @@ inline std::string firstConfigIssue(const std::vector<ConfigIssue> &issues) {
     return "";
 }
 
-} // namespace vinput
+} // namespace ainput

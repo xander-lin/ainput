@@ -16,7 +16,7 @@ It must not require providers to know about fcitx5 input contexts or focus state
 
 ```text
 fcitx5 KeyEvent
-  -> VinputAddon activation lifecycle
+  -> AinputAddon activation lifecycle
   -> AudioCapture start/stop
   -> IAsrProvider::transcribe(samples, wavPath)
   -> provider callback

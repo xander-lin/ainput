@@ -30,7 +30,7 @@ Fcitx5 是一个跨平台的输入法框架，使用 C++ (C++17) 编写，发布
 | **UserInterface** (UI) | 显示输入法界面 (候选窗、状态栏等)             | ClassicUI, Kimpanel          |
 | **Module** (模块)      | 不属于以上三类的其他功能 addon                | Clipboard, Spell, Emoji      |
 
-对 Vinput (语音输入) 项目而言：
+对 Ainput (语音输入) 项目而言：
 - `adapter/` 对应 Module 类型 addon，挂载到 fcitx5 框架中
 - `ASR_provider/` 对应语音识别后端逻辑
 

@@ -16,28 +16,28 @@ bool contains(const std::string &text, const std::string &needle) {
 } // namespace
 
 int main() {
-    if (vinput::sha256::hashHex("") !=
+    if (ainput::sha256::hashHex("") !=
         "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855") {
         std::cerr << "SHA-256 empty-string vector mismatch\n";
         return 1;
     }
-    if (vinput::sha256::hashHex("abc") !=
+    if (ainput::sha256::hashHex("abc") !=
         "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad") {
         std::cerr << "SHA-256 abc vector mismatch\n";
         return 1;
     }
-    if (vinput::sha256::hashHex("The quick brown fox jumps over the lazy dog") !=
+    if (ainput::sha256::hashHex("The quick brown fox jumps over the lazy dog") !=
         "d7a8fbb307d7809469ca9abcb0082e4f8d5651e46d3cdb762d02d0bf37c9e592") {
         std::cerr << "SHA-256 fox vector mismatch\n";
         return 1;
     }
-    if (vinput::hashDiagnosticValue("diagnostic-secret") !=
+    if (ainput::hashDiagnosticValue("diagnostic-secret") !=
         "de5a55536fc8350ce2c60389ad2ae99807bc8ecdbf940c05816e9b72ca14c9bf") {
         std::cerr << "SHA-256 diagnostic hash mismatch\n";
         return 1;
     }
 
-    vinput::MemoryDiagnosticLog memory;
+    ainput::MemoryDiagnosticLog memory;
     memory.event("test", "sample", {{"value_hash", "abc"}, {"length", "4"}});
     const auto lines = memory.lines();
     if (lines.size() != 1 || !contains(lines.front(), "\"event\":\"sample\"") ||
@@ -50,11 +50,11 @@ int main() {
         return 1;
     }
 
-    const auto root = std::filesystem::temp_directory_path() / "vinput-diagnostic-log-test";
+    const auto root = std::filesystem::temp_directory_path() / "ainput-diagnostic-log-test";
     std::filesystem::remove_all(root);
     std::filesystem::create_directories(root);
     const auto path = root / "diagnostic.log";
-    vinput::FileDiagnosticLog file(path.string(), 256);
+    ainput::FileDiagnosticLog file(path.string(), 256);
     file.event("test", "first", {{"value_hash", "abc"}});
     file.event("test", "second", {{"value_hash", "def"}});
     file.event("test", "third", {{"value_hash", "ghi"}});
@@ -81,7 +81,7 @@ int main() {
         std::ofstream output(path, std::ios::binary | std::ios::app);
         output << std::string(256 - std::filesystem::file_size(path), 'x');
     }
-    vinput::FileDiagnosticLog existing(path.string(), 256);
+    ainput::FileDiagnosticLog existing(path.string(), 256);
     existing.event("test", "must_not_write");
     if (!existing.stopped() || std::filesystem::file_size(path) != 256) {
         std::cerr << "pre-existing full diagnostic log was not stopped\n";

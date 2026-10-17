@@ -1,11 +1,11 @@
 # Configuration
 
-Everything user-editable lives in `~/.config/vinput/`. Defaults are built into
+Everything user-editable lives in `~/.config/ainput/`. Defaults are built into
 the code — files are **optional and sparse**: create only what you want to
 change, copy nothing you don't. `//` line comments are allowed in every file.
 
 ```
-~/.config/vinput/
+~/.config/ainput/
 ├── config.json        # provider selection + [ui] + [audio]
 ├── qwen.json          # cloud provider (api_key, model, ...)
 ├── doubao.json
@@ -24,18 +24,18 @@ work with built-in defaults once the models are installed.
 
 Seeded credential templates carry `"api_key": "PASTE_YOUR_KEY_HERE"`, which
 counts as *not configured*: recognition fails with
-`Vinput: fill api_key in ~/.config/vinput/qwen.json` until you replace it.
+`Ainput: fill api_key in ~/.config/ainput/qwen.json` until you replace it.
 The first recognition on a fresh install therefore walks the user straight
 to a self-documenting file — no manual hunting for docs.
 
 There is no `/etc/vinput` layer and no pacnew dance. The auto-detected device
-buffer cache moved to `~/.cache/vinput/pa_buffer.json` — it is state, not
+buffer cache moved to `~/.cache/ainput/pa_buffer.json` — it is state, not
 configuration, and regenerates itself.
 
 ## Boundary (repo side)
 
 - Track `*.example` in Git; never track real `*.json` (`.gitignore` covers `config/*.json`).
-- Real API keys and paths belong only in `~/.config/vinput/`.
+- Real API keys and paths belong only in `~/.config/ainput/`.
 
 ## `config.json` — global file
 
@@ -79,9 +79,9 @@ configuration, and regenerates itself.
 
 | Key | Default | Purpose |
 |-----|---------|---------|
-| `model_dir` | `~/.local/share/vinput/models/...` | sherpa-onnx model directory |
+| `model_dir` | `~/.local/share/ainput/models/...` | sherpa-onnx model directory |
 | `timeout_sec` | `120` | Local binary wall-clock timeout |
-| `bin_path` | `~/.local/share/vinput/sherpa-onnx/bin/...` | sherpa-onnx binary (`sherpa-onnx` for zipformer, `sherpa-onnx-offline` for fire_red) |
+| `bin_path` | `~/.local/share/ainput/sherpa-onnx/bin/...` | sherpa-onnx binary (`sherpa-onnx` for zipformer, `sherpa-onnx-offline` for fire_red) |
 
 ## API keys (plaintext)
 
@@ -89,7 +89,7 @@ Cloud API keys are plain `api_key` fields in the vendor JSON — there is no
 secret store integration (removed 2026-10 by design). Protect the files:
 
 ```bash
-chmod 600 ~/.config/vinput/qwen.json ~/.config/vinput/doubao.json
+chmod 600 ~/.config/ainput/qwen.json ~/.config/ainput/doubao.json
 ```
 
 ## Comments
@@ -112,7 +112,7 @@ Every config file is validated on read against a schema
 (`ASR_provider/src/config_schema.h`):
 
 - JSON syntax errors are pinpointed with a byte offset and reported in the
-  input panel (`Vinput: config.json: ...`), and the file's values are not
+  input panel (`Ainput: config.json: ...`), and the file's values are not
   trusted (defaults apply).
 - Unknown or misspelled fields get a "did you mean" suggestion
   (`"modelname" (did you mean "model"?)`), type mismatches are named

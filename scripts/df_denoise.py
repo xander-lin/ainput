@@ -6,7 +6,7 @@ resamples back to 16kHz, writes output.
 """
 import subprocess, sys, struct, os, shutil
 
-DF_BIN = os.path.expanduser("~/.local/share/vinput/bin/deep-filter")
+DF_BIN = os.path.expanduser("~/.local/share/ainput/bin/deep-filter")
 
 def wav_read(path):
     with open(path, "rb") as f:
@@ -62,7 +62,7 @@ def main():
 
     # Resample to 48kHz
     samples_48k = resample(samples, sr, 48000)
-    tmp_48k = f"/tmp/vinput_df_{os.getpid()}_48k.wav"
+    tmp_48k = f"/tmp/ainput_df_{os.getpid()}_48k.wav"
     wav_write(tmp_48k, samples_48k, 48000)
 
     # Run deep-filter — with -o to same dir, file is modified in-place

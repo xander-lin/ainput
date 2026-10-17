@@ -2,7 +2,7 @@
 
 #include "asr_provider.h"
 
-namespace vinput {
+namespace ainput {
 
 class MockAsrProvider : public IAsrProvider {
 public:
@@ -18,4 +18,4 @@ public:
     }
 };
 
-} // namespace vinput
+} // namespace ainput

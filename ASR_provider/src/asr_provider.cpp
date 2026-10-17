@@ -1,6 +1,6 @@
 #include "asr_provider.h"
 
-namespace vinput {
+namespace ainput {
 
 AsrProviderRegistry &AsrProviderRegistry::instance() {
     static AsrProviderRegistry reg;
@@ -31,4 +31,4 @@ AsrProviderRegistry::create(const std::string &id) const {
     return nullptr;
 }
 
-} // namespace vinput
+} // namespace ainput

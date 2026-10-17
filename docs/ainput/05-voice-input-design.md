@@ -1,4 +1,4 @@
-# Vinput Voice Input Design
+# Ainput Voice Input Design
 
 ## Current Architecture
 
@@ -6,7 +6,7 @@
 fcitx5
   |
   v
-adapter/VinputAddon
+adapter/AinputAddon
   |-- key lifecycle: CapsLock press/release and switch mode
   |-- provider/denoiser selection and notifications
   |-- AudioCapture lifecycle
@@ -41,8 +41,8 @@ adapter/OutputHandler
 
 ```text
 CapsLock press
-  -> VinputAddon stores timing and input context metadata
-  -> after activation delay, VinputAddon creates provider and AudioCapture
+  -> AinputAddon stores timing and input context metadata
+  -> after activation delay, AinputAddon creates provider and AudioCapture
   -> OutputHandler captures the current input context uuid
   -> AudioCapture records and preprocesses audio
 
@@ -52,12 +52,12 @@ CapsLock release
   -> provider calls onResult/onError
   -> OutputHandler::submit(text)
   -> commitString(text)
-  -> VinputAddon restores CapsLock state through uinput
+  -> AinputAddon restores CapsLock state through uinput
 ```
 
 ## Switch Flow
 
-`Ctrl+CapsLock` enters switch mode without starting audio capture. Horizontal keys switch ASR providers. Vertical keys switch denoisers. ASR selection is persisted to the `"provider"` line of `~/.config/vinput/config.json`; the denoiser to its `[audio]` section.
+`Ctrl+CapsLock` enters switch mode without starting audio capture. Horizontal keys switch ASR providers. Vertical keys switch denoisers. ASR selection is persisted to the `"provider"` line of `~/.config/ainput/config.json`; the denoiser to its `[audio]` section.
 
 ## Failure Modes
 
@@ -68,7 +68,7 @@ CapsLock release
 | Provider | missing API key or model binary | provider calls `onError` or logs provider-specific failure |
 | OutputHandler | captured input context no longer exists | no focused context found, result dropped and logged |
 | uinput | `/dev/uinput` unavailable | logs failure; voice input can still work but CapsLock restore is unavailable |
-| uinput | `/dev/uinput` not writable | same as above; the shipped `70-vinput-uinput.rules` grants it to local sessions via `uaccess` |
+| uinput | `/dev/uinput` not writable | same as above; the shipped `70-ainput-uinput.rules` grants it to local sessions via `uaccess` |
 
 ## Verification
 

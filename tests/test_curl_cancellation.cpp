@@ -1,4 +1,4 @@
-#include "vinput_config.h"
+#include "ainput_config.h"
 
 #include <arpa/inet.h>
 #include <atomic>
@@ -20,15 +20,15 @@ size_t discardResponse(char *, size_t size, size_t count, void *) {
 
 int main() {
     {
-        CURL *before = vinput::getCurl();
+        CURL *before = ainput::getCurl();
         if (!before) {
             std::cerr << "getCurl returned nullptr\n";
             return 1;
         }
         void *sentinel = reinterpret_cast<void *>(0x1);
         curl_easy_setopt(before, CURLOPT_PRIVATE, sentinel);
-        vinput::evictCurlHandle();
-        CURL *after = vinput::getCurl();
+        ainput::evictCurlHandle();
+        CURL *after = ainput::getCurl();
         if (!after) {
             std::cerr << "getCurl returned nullptr after evict\n";
             return 1;
@@ -103,7 +103,7 @@ int main() {
     CURLcode result = CURLE_OK;
     auto start = std::chrono::steady_clock::now();
     {
-        vinput::CurlCancellationScope cancellation(curl, cancel);
+        ainput::CurlCancellationScope cancellation(curl, cancel);
         std::thread request([&] { result = curl_easy_perform(curl); });
         while (!serverReady.load() &&
                std::chrono::steady_clock::now() - start < std::chrono::seconds(1)) {

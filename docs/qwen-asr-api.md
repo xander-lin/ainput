@@ -1,8 +1,8 @@
 # Qwen ASR API（阿里云百炼 DashScope）
 
-Vinput 的 `qwen` provider 通过 DashScope multimodal 同步接口调用阿里云 ASR
+Ainput 的 `qwen` provider 通过 DashScope multimodal 同步接口调用阿里云 ASR
 模型，音频以 base64 Data URL 内联传输，无需公网 URL。模型 ID、端点与识别
-选项全部由 `~/.config/vinput/qwen.json` 驱动，**每次识别前重读配置**，更换
+选项全部由 `~/.config/ainput/qwen.json` 驱动，**每次识别前重读配置**，更换
 模型不需要重启 fcitx5，也不需要重新编译。
 
 ## 模型选型（2026-10 核实）
@@ -15,11 +15,11 @@ Vinput 的 `qwen` provider 通过 DashScope multimodal 同步接口调用阿里�
 | `qwen3-asr-flash` | 旧（逐步下线中） | ≤5 分钟 / ≤10MB | 2026-07 起其最新快照已下线，仍可用但不要再新建业务 |
 
 长音频异步转写（`*-filetrans`、`fun-asr`）是提交+轮询模式，不属于语音输
-入场景，Vinput 不使用。
+入场景，Ainput 不使用。
 
 ## 配置
 
-文件：`~/.config/vinput/qwen.json`（缺失字段用默认值）
+文件：`~/.config/ainput/qwen.json`（缺失字段用默认值）
 
 ```json
 {
@@ -29,7 +29,7 @@ Vinput 的 `qwen` provider 通过 DashScope multimodal 同步接口调用阿里�
     "language_hints": ["zh"],
     "keep_dialect": false,
     "speaker_diarization": false,
-    "vocabulary": {"Vinput": 5},
+    "vocabulary": {"Ainput": 5},
     "vocabulary_id": "",
     "timeout_sec": 60
 }
@@ -47,7 +47,7 @@ Vinput 的 `qwen` provider 通过 DashScope multimodal 同步接口调用阿里�
 | `vocabulary_id` | 不启用 | 控制台预编译热词表 ID |
 | `timeout_sec` | `60` | 整个请求的 curl 超时 |
 
-`format`/`sample_rate` 描述 Vinput 自身录音管线（16 kHz 单声道 WAV），
+`format`/`sample_rate` 描述 Ainput 自身录音管线（16 kHz 单声道 WAV），
 固定发送，不可配置。
 
 ## 请求格式
@@ -74,7 +74,7 @@ Vinput 的 `qwen` provider 通过 DashScope multimodal 同步接口调用阿里�
         "format": "wav",
         "sample_rate": "16000",
         "language_hints": ["zh"],
-        "vocabulary": {"Vinput": 5}
+        "vocabulary": {"Ainput": 5}
     }
 }
 ```
