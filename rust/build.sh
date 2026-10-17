@@ -17,16 +17,29 @@ target_dir=$6
 
 manifest="$src/rust/Cargo.toml"
 
+# Cross builds are selected by the same variable cargo itself uses, so meson's
+# cross file and a manual build cannot disagree. Without this the archive would
+# be built for the host and the linker would reject it ("Relocations in
+# generic ELF (EM: 62)"), which is a confusing way to learn the flag was lost.
+target=${CARGO_BUILD_TARGET:-}
+
 if [ "$profile" = "release" ]; then
     set -- build --release
-    artifact="$target_dir/release/libainput_core.a"
+    subdir="release"
 else
     set -- build
-    artifact="$target_dir/debug/libainput_core.a"
+    subdir="debug"
 fi
 
 if [ -n "$features" ]; then
     set -- "$@" --features "$features"
+fi
+
+if [ -n "$target" ]; then
+    set -- "$@" --target "$target"
+    artifact="$target_dir/$target/$subdir/libainput_core.a"
+else
+    artifact="$target_dir/$subdir/libainput_core.a"
 fi
 
 "$cargo" "$@" --manifest-path "$manifest" --target-dir "$target_dir"

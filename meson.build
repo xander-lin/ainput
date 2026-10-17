@@ -9,6 +9,24 @@ project('fcitx5-ainput', 'cpp',
 
 add_project_arguments('-Wno-variadic-macros', language: 'cpp')
 
+# Cross builds against a sysroot tripped -Wpedantic inside glibc's own headers
+# (bits/fcntl-linux.h declares `unsigned char f_handle[0]`). That is a property
+# of the target system headers, not of our code, and with -Werror it is fatal.
+# Only disable it for cross builds so native ones keep the stricter check.
+if meson.is_cross_build()
+  add_project_arguments('-Wno-pedantic', language: 'cpp')
+endif
+
+# Under a cross build the Rust archive has to be built for the target too,
+# otherwise the linker gets host objects ("file in wrong format").
+cpu_family = host_machine.cpu_family()
+rust_target = ''
+if cpu_family == 'aarch64'
+  rust_target = 'aarch64-unknown-linux-gnu'
+elif cpu_family == 'x86_64'
+  rust_target = 'x86_64-unknown-linux-gnu'
+endif
+
 cargo = find_program('cargo', required: true)
 
 rust_profile = get_option('buildtype') == 'debug' ? 'debug' : 'release'
@@ -25,6 +43,7 @@ rust_core = custom_target('ainput_core_rust',
     rust_features,
     meson.current_build_dir() / 'rust-target',
   ],
+  env: rust_target == '' ? {} : {'CARGO_BUILD_TARGET': rust_target},
   build_by_default: true,
   # cargo does its own change detection; marking the target stale keeps meson
   # from needing a hand-maintained list of every Rust source file.

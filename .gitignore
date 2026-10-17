@@ -9,6 +9,10 @@
 /log.txt
 *.pkg.tar.*
 
+# Release artifacts produced by tools/make-release.sh; published on GitHub
+# Releases, never committed (a binary in git history is forever).
+/dist/
+
 # Rust build artefacts (the meson build puts these in the build tree, but a
 # bare `cargo build` uses these)
 /rust/target/

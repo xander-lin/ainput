@@ -1,0 +1,10 @@
+# Cross-compilation settings for the release artifacts.
+#
+# The addon links the system libraries dynamically, so a cross build needs the
+# target's headers and link-time .so stubs, not a static toolchain. Point
+# AINPUT_SYSROOT at an aarch64 sysroot (tools/cross-aarch64.sh builds one).
+#
+# Nothing here affects a native build: these sections only apply when the
+# target triple matches.
+[target.aarch64-unknown-linux-gnu]
+linker = "aarch64-linux-gnu-gcc"
