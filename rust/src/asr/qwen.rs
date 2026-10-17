@@ -12,6 +12,7 @@ use super::{Input, Provider};
 use crate::config;
 use crate::error::{Error, Result};
 use crate::http::{self, TransportError};
+use crate::settings::Credentials;
 use crate::templates;
 
 const DEFAULT_MODEL: &str = "qwen-audio-3.1-asr-flash";
@@ -33,7 +34,7 @@ struct Settings {
 }
 
 impl Settings {
-    fn load() -> Result<Self> {
+    fn load(credentials: &Credentials) -> Result<Self> {
         config::read_or_seed("qwen.json", templates::qwen);
         let value = match config::read_json("qwen.json") {
             Ok(Some(value)) => value,
@@ -50,26 +51,30 @@ impl Settings {
             return Err(Error::config_invalid(issue.message.clone()));
         }
 
-        let api_key = value
+        // A value typed into fcitx5-configtool wins; otherwise the file, then
+        // the built-in default. Empty means "not set here", never "clear it".
+        let file_key = value
             .get("api_key")
             .and_then(Value::as_str)
-            .unwrap_or_default()
-            .trim()
-            .to_string();
-        if api_key.is_empty() || api_key == config::PLACEHOLDER_KEY {
-            return Err(Error::config_missing(
-                "fill api_key in ~/.config/ainput/qwen.json",
-            ));
-        }
+            .unwrap_or_default();
+        let api_key = Credentials::value(&credentials.qwen_api_key)
+            .or_else(|| Credentials::value(file_key))
+            .ok_or_else(|| {
+                Error::config_missing(
+                    "fill QwenApiKey in fcitx5-configtool, or api_key in                      ~/.config/ainput/qwen.json",
+                )
+            })?;
+
+        let file_model = value
+            .get("model")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
 
         Ok(Self {
             api_key,
-            model: value
-                .get("model")
-                .and_then(Value::as_str)
-                .filter(|s| !s.is_empty())
-                .unwrap_or(DEFAULT_MODEL)
-                .to_string(),
+            model: Credentials::value(&credentials.qwen_model)
+                .or_else(|| Credentials::value(file_model))
+                .unwrap_or_else(|| DEFAULT_MODEL.to_string()),
             endpoint: value
                 .get("endpoint")
                 .and_then(Value::as_str)
@@ -251,7 +256,7 @@ fn classify(status: u64, code: &str, message: &str) -> crate::error::Category {
 
 impl Provider for Qwen {
     fn transcribe(&self, input: &Input<'_>) -> Result<String> {
-        let settings = Settings::load()?;
+        let settings = Settings::load(&input.credentials)?;
         if input.cancel.load(Ordering::Relaxed) {
             return Err(Error::timeout("cancelled"));
         }

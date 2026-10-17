@@ -36,11 +36,18 @@ typedef struct {
     const char *provider;         // e.g. "qwen"; NULL means default
     int32_t activation_msec;
     int32_t notification_timeout;
-    int32_t debounce_count;
+    int32_t buffer_ms;            // PulseAudio fragment size, in milliseconds
     int32_t denoise;              // AINPUT_DENOISE_*
     double lufs_target;
     int32_t speex_level;
     double crest_threshold;
+
+    // Credentials and model ids set in fcitx5-configtool. NULL or empty means
+    // "not set here": the provider then uses its JSON file.
+    const char *qwen_api_key;
+    const char *qwen_model;
+    const char *doubao_api_key;
+    const char *doubao_model;
 } AinputSettings;
 
 enum {

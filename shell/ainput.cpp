@@ -91,6 +91,10 @@ constexpr auto kMaxRecordingTime = std::chrono::seconds(120);
 /// Idle time after which a stale key debounce counter is cleared, so one lost
 /// synthetic event cannot swallow every later CapsLock press.
 constexpr auto kDebounceIdleReset = std::chrono::seconds(10);
+/// CapsLock events ignored after the restore tap: one press + one release.
+/// Not a user setting — changing it only makes sense when a compositor
+/// duplicates the synthetic event, and that is better handled in code.
+constexpr int kRestoreDebounceEvents = 2;
 
 
 FCITX_CONFIG_ENUM(AinputDenoise, none, speexdsp, deepfilter);
@@ -104,11 +108,19 @@ FCITX_CONFIGURATION(
         this, "ActivationMsec", "How long CapsLock must be held (ms)", 300,
         fcitx::IntConstrain(50, 5000)};
     fcitx::Option<int, fcitx::IntConstrain> notificationTimeout{
-        this, "NotificationTimeout", "Switch notification duration (ms)", 2000,
-        fcitx::IntConstrain(200, 20000)};
-    fcitx::Option<int, fcitx::IntConstrain> debounceCount{
-        this, "DebounceCount", "CapsLock events to swallow after restore", 2,
-        fcitx::IntConstrain(0, 20)};
+        this, "NotificationTimeout",
+        "How long the Ctrl+CapsLock switch notification stays on screen (ms)",
+        2000, fcitx::IntConstrain(200, 20000)};
+    // PulseAudio hands us audio in fragments of this size. Larger fragments
+    // buffer more audio (safer against clipping the last syllable on devices
+    // with bursty delivery) but add latency before processing starts.
+    // There is no auto-detection: it is a plain setting so a device that
+    // clips or stutters can be fixed by hand.
+    fcitx::Option<int, fcitx::IntConstrain> bufferMs{
+        this, "BufferMs",
+        "Microphone buffer in ms. Raise if the end of a phrase is cut off, "
+        "lower for quicker response",
+        100, fcitx::IntConstrain(20, 1000)};
     fcitx::Option<AinputDenoise> denoise{
         this, "Denoise", "Noise reduction method", AinputDenoise::none};
     fcitx::Option<double, fcitx::NoConstrain<double>, fcitx::DoubleMarshaller> lufsTarget{
@@ -118,6 +130,20 @@ FCITX_CONFIGURATION(
         fcitx::IntConstrain(-100, 0)};
     fcitx::Option<double, fcitx::NoConstrain<double>, fcitx::DoubleMarshaller> crestThreshold{
         this, "CrestThreshold", "Speech gate; 0 disables", 2.4};
+
+    // ---- credentials and model ids ----
+    // These override the values in ~/.config/ainput/<provider>.json. An empty
+    // field means "use the file", so an existing setup keeps working and the
+    // GUI is the obvious place for a new one.
+    fcitx::Option<std::string> qwenApiKey{
+        this, "QwenApiKey", "Qwen (DashScope) API key", ""};
+    fcitx::Option<std::string> qwenModel{
+        this, "QwenModel",
+        "Qwen model id (empty = qwen-audio-3.1-asr-flash)", ""};
+    fcitx::Option<std::string> doubaoApiKey{
+        this, "DoubaoApiKey", "Doubao (Volcengine) API key", ""};
+    fcitx::Option<std::string> doubaoModel{
+        this, "DoubaoModel", "Doubao model name (empty = bigmodel)", ""};
 );
 
 int32_t denoiseToInt(AinputDenoise value) {
@@ -286,11 +312,15 @@ private:
         settings.provider = provider.c_str();
         settings.activation_msec = config_.activationMsec.value();
         settings.notification_timeout = config_.notificationTimeout.value();
-        settings.debounce_count = config_.debounceCount.value();
+        settings.buffer_ms = config_.bufferMs.value();
         settings.denoise = denoiseToInt(config_.denoise.value());
         settings.lufs_target = config_.lufsTarget.value();
         settings.speex_level = config_.speexLevel.value();
         settings.crest_threshold = config_.crestThreshold.value();
+        settings.qwen_api_key = config_.qwenApiKey.value().c_str();
+        settings.qwen_model = config_.qwenModel.value().c_str();
+        settings.doubao_api_key = config_.doubaoApiKey.value().c_str();
+        settings.doubao_model = config_.doubaoModel.value().c_str();
         ainput_engine_set_settings(engine_, &settings);
     }
 
@@ -310,7 +340,6 @@ private:
         }
         config_.activationMsec.setValue(legacy.activation_msec);
         config_.notificationTimeout.setValue(legacy.notification_timeout);
-        config_.debounceCount.setValue(legacy.debounce_count);
         switch (legacy.denoise) {
         case AINPUT_DENOISE_SPEEXDSP:
             config_.denoise.setValue(AinputDenoise::speexdsp);
@@ -483,7 +512,7 @@ private:
                 deactivate();
             } else if (switchActive_) {
                 switchActive_ = false;
-                revertDebounce_ = config_.debounceCount.value();
+                revertDebounce_ = kRestoreDebounceEvents;
                 ainput_uinput_restore_capslock();
             } else {
                 timer_.reset();
@@ -609,7 +638,7 @@ private:
         activeId_ = 0;
         output_->showStatus(targetFor(id), "Ainput: processing audio...");
         ainput_engine_stop(engine_, id);
-        revertDebounce_ = config_.debounceCount.value();
+        revertDebounce_ = kRestoreDebounceEvents;
     }
 
     /// Recovers from a dropped key event: a recording that outlived

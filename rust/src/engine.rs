@@ -55,6 +55,7 @@ impl Callbacks {
 struct Job {
     id: u64,
     wav_path: PathBuf,
+    credentials: crate::settings::Credentials,
 }
 
 pub struct Engine {
@@ -113,8 +114,10 @@ impl Engine {
                 ("provider", settings.provider.clone()),
                 ("denoise", settings.denoise.as_str().to_string()),
                 ("crest_threshold", format!("{:.2}", settings.crest_threshold)),
+                ("buffer_ms", settings.buffer_ms.to_string()),
             ],
         );
+        crate::settings::set_active_credentials(settings.credentials.clone());
         if let Ok(mut slot) = self.settings.write() {
             *slot = settings;
         }
@@ -154,6 +157,7 @@ impl Engine {
         }
 
         let id = self.next_id.fetch_add(1, Ordering::SeqCst) + 1;
+        let credentials = settings.credentials.clone();
         let callbacks = self.callbacks;
         let pending = self.pending.clone();
         let sender = self
@@ -168,6 +172,7 @@ impl Engine {
                     let job = Job {
                         id,
                         wav_path: captured.wav_path.clone(),
+                        credentials: credentials.clone(),
                     };
                     if sender.send(job).is_err() {
                         pending.fetch_sub(1, Ordering::SeqCst);
@@ -323,8 +328,6 @@ fn worker_loop(
 
 fn recognize(job: Job) -> Result<String, Error> {
     let cleanup = Cleanup(&job.wav_path);
-    let settings = crate::settings::Settings::default();
-    let _ = settings;
 
     let provider_id = current_provider();
     let provider = asr::create(&provider_id).ok_or_else(|| {
@@ -335,6 +338,7 @@ fn recognize(job: Job) -> Result<String, Error> {
     let input = asr::Input {
         wav_path: &job.wav_path,
         cancel: &cancel,
+        credentials: &job.credentials,
     };
     let result = provider.transcribe(&input);
     drop(cleanup);
@@ -403,10 +407,12 @@ mod tests {
         let mut settings = Settings::default();
         settings.activation_msec = 1;
         settings.crest_threshold = -5.0;
+        settings.buffer_ms = 5;
         engine.set_settings(settings);
         let snapshot = engine.settings_snapshot();
         assert!(snapshot.activation_msec >= 50);
         assert!(snapshot.crest_threshold >= 0.0);
+        assert!(snapshot.buffer_ms >= 20);
         engine.shutdown();
     }
 
@@ -469,6 +475,13 @@ mod tests {
         settings.provider = "mock".to_string();
         // Make the gate permissive so a quiet room still reaches the provider.
         settings.crest_threshold = 0.0;
+        // Lets a manual run exercise a non-default fragment size:
+        //   AINPUT_BUFFER_MS=250 cargo test --features diagnostics -- --ignored
+        if let Ok(value) = std::env::var("AINPUT_BUFFER_MS") {
+            if let Ok(ms) = value.parse::<i32>() {
+                settings.buffer_ms = ms;
+            }
+        }
         settings.denoise = crate::settings::Denoise::None;
         set_current_provider("mock");
         engine.set_settings(settings);

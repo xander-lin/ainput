@@ -22,6 +22,7 @@ wrong and why.
 | 2. Results dropped on UUID mismatch | Gone. The commit falls back to the currently focused input context and logs it. |
 | 3. Key state stuck | Mitigated. A recording older than 120 s is force-stopped, and a debounce counter idle for 10 s is cleared. |
 | 4. `ProcessingTurn` lock | Gone. Each recording has its own thread and buffer; there is no global ticket. |
+| — Buffer auto-detection | Never was wired into capture (`fragsize` was hard-coded). Replaced by the `BufferMs` setting; the `pa_buffer.json` cache no longer exists. See `found.md` #17. |
 | 5. Crest/VAD gate | Unchanged behaviour, now adjustable in fcitx5-configtool. |
 | 7. Suggested fixes | Not applied as written; superseded by the rewrite. |
 

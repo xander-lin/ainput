@@ -23,8 +23,8 @@ rewrites the file on exit).
 |--------|---------|---------|
 | `Provider` | `qwen` | Backend: `qwen`, `doubao`, `zipformer`, `fire_red`, `mock`. `Ctrl+CapsLock` switching rewrites this |
 | `ActivationMsec` | `300` | How long CapsLock must be held before recording starts (50–5000) |
-| `NotificationTimeout` | `2000` | How long switch notifications stay visible (200–20000 ms) |
-| `DebounceCount` | `2` | Synthetic CapsLock events swallowed after the restore tap |
+| `NotificationTimeout` | `2000` | How long the `Ctrl+CapsLock` switch notification stays on screen (200–20000 ms) |
+| `BufferMs` | `100` | Microphone fragment size (20–1000 ms). Raise if the end of a phrase is cut off; lower for quicker response |
 | `Denoise` | `none` | `none`, `speexdsp`, or `deepfilter` |
 | `LufsTarget` | `-16.0` | Loudness normalization target in LUFS; values outside (-100, 0) fall back to the default |
 | `SpeexLevel` | `-15` | speexdsp suppression strength in dB (-100–0) |
@@ -32,6 +32,43 @@ rewrites the file on exit).
 
 fcitx5 only writes options that differ from their default, so the file stays
 short. Missing options mean "default".
+
+### Credentials and model ids
+
+Four settings exist so a fresh install can be configured entirely in
+fcitx5-configtool:
+
+| Option | Meaning |
+|--------|---------|
+| `QwenApiKey` | DashScope API key |
+| `QwenModel` | Qwen model id |
+| `DoubaoApiKey` | Volcengine app key |
+| `DoubaoModel` | Doubao `request.model_name` |
+
+**Empty means "not set here"** — the provider then falls back to
+`~/.config/ainput/<provider>.json`, and finally to its built-in default. An
+empty field never clears a key you already have in the file, so an existing
+setup keeps working and the GUI is simply the more convenient place to put a
+new one.
+
+Precedence, highest first: fcitx5-configtool → provider JSON → built-in
+default. The `Ctrl+CapsLock` notification shows the model that will actually
+run, including a GUI override.
+
+### Microphone buffer
+
+`BufferMs` sets the PulseAudio fragment size (100 ms = 3200 bytes at
+16 kHz mono). It is a plain setting: there is no auto-detection, because the
+detection that used to exist was never wired into the capture path and the
+value in use was a hard-coded 100 ms.
+
+Two symptoms point in opposite directions:
+
+- the end of a phrase is cut off → **raise** it (200–400 ms helps on devices
+  that deliver audio in bursts)
+- recognition starts noticeably after you stop speaking → **lower** it
+
+### Denoiser
 
 `Denoise` is `none` out of the box. `speexdsp` needs no extra software.
 `deepfilter` requires an executable at

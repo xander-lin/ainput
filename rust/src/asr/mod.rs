@@ -20,6 +20,8 @@ use crate::templates;
 pub struct Input<'a> {
     pub wav_path: &'a Path,
     pub cancel: &'a Arc<AtomicBool>,
+    /// Values from fcitx5-configtool; empty fields fall back to the JSON file.
+    pub credentials: &'a crate::settings::Credentials,
 }
 
 pub trait Provider: Send {
@@ -118,12 +120,17 @@ fn cloud_summary(
     };
     let issues = config::validate(&value, &fields(), "");
     let warning = config::first_issue(&issues);
-    let model = value
+    let file_model = value
         .get(model_key)
         .and_then(|v| v.as_str())
-        .filter(|s| !s.is_empty())
-        .unwrap_or(default_model)
-        .to_string();
+        .unwrap_or_default();
+    let override_model = match file {
+        "qwen.json" => &crate::settings::active_credentials().qwen_model,
+        _ => &crate::settings::active_credentials().doubao_model,
+    };
+    let model = crate::settings::Credentials::value(override_model)
+        .or_else(|| crate::settings::Credentials::value(file_model))
+        .unwrap_or_else(|| default_model.to_string());
     (model, warning)
 }
 

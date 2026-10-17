@@ -76,8 +76,10 @@ How long CapsLock must be held before recording starts.
 \fBNotificationTimeout\fP (default \fB2000\fP)
 How long switch notifications stay visible, in milliseconds.
 .TP
-\fBDebounceCount\fP (default \fB2\fP)
-Synthetic CapsLock events swallowed after the restore tap.
+\fBBufferMs\fP (default \fB100\fP)
+PulseAudio fragment size in milliseconds (20-1000). Raise it when the end of
+a phrase is cut off on a device that delivers audio in bursts; lower it for
+quicker response. There is no auto-detection.
 .TP
 \fBDenoise\fP (default \fBnone\fP)
 none, speexdsp or deepfilter. deepfilter needs a helper binary at
@@ -91,6 +93,13 @@ speexdsp suppression strength in dB.
 .TP
 \fBCrestThreshold\fP (default \fB2.4\fP)
 Speech gate; lower is more permissive, 0 disables it.
+.PP
+Four further options accept credentials and model ids so a fresh install can
+be configured entirely here: \fBQwenApiKey\fP, \fBQwenModel\fP,
+\fBDoubaoApiKey\fP and \fBDoubaoModel\fP. An empty value means "not set
+here"; the provider then uses \fB~/.config/ainput/<provider>.json\fP and
+finally its built-in default, so an empty field never clears a key that is
+already configured in the file.
 .SS User-facing (must edit)
 .TP
 \fBdoubao.json\fP

@@ -27,8 +27,8 @@ use crate::error::{Category, Error, Result};
 use crate::settings::Settings;
 use crate::wav;
 
-/// 100 ms at 16 kHz mono S16.
-const FRAGSIZE_BYTES: u32 = 3200;
+/// Bytes of 16 kHz mono S16 audio per millisecond.
+const BYTES_PER_MS: u32 = 32;
 /// How long to wait for the stream to reach READY before giving up.
 const READY_TIMEOUT: Duration = Duration::from_secs(3);
 /// Poll interval while recording; bounds stop latency.
@@ -213,13 +213,26 @@ fn run_capture<F>(
         }
     };
 
+    // The fragment size is the user's BufferMs setting, not a guess: on a
+    // device that delivers audio in bursts, a larger fragment is what keeps
+    // the end of a phrase from being cut off.
+    let fragsize = (settings.buffer_ms.max(1) as u32) * BYTES_PER_MS;
     let attr = pulse::def::BufferAttr {
         maxlength: u32::MAX,
         tlength: u32::MAX,
         prebuf: u32::MAX,
         minreq: u32::MAX,
-        fragsize: FRAGSIZE_BYTES,
+        fragsize,
     };
+    diagnostic::event(
+        "audio",
+        "capture_buffer",
+        &[
+            ("recognition_id", recognition_id.to_string()),
+            ("buffer_ms", settings.buffer_ms.to_string()),
+            ("fragsize_bytes", fragsize.to_string()),
+        ],
+    );
     if let Err(err) = stream.connect_record(
         None,
         Some(&attr),

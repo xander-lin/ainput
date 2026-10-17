@@ -17,9 +17,17 @@ fn transcribes_a_real_file() {
 
     let provider = ainput_core::smoke::create(&provider_id).expect("unknown provider");
     let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    // Optional: test the GUI-provided overrides without touching configtool.
+    let credentials = ainput_core::smoke::Credentials {
+        qwen_api_key: std::env::var("AINPUT_SMOKE_QWEN_KEY").unwrap_or_default(),
+        qwen_model: std::env::var("AINPUT_SMOKE_QWEN_MODEL").unwrap_or_default(),
+        doubao_api_key: std::env::var("AINPUT_SMOKE_DOUBAO_KEY").unwrap_or_default(),
+        doubao_model: std::env::var("AINPUT_SMOKE_DOUBAO_MODEL").unwrap_or_default(),
+    };
     let result = provider.transcribe(&ainput_core::smoke::Input {
         wav_path: &path,
         cancel: &cancel,
+        credentials: &credentials,
     });
     match result {
         Ok(text) => println!("OK [{provider_id}] -> {text}"),

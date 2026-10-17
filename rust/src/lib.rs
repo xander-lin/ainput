@@ -8,6 +8,7 @@ mod asr;
 /// Minimal re-exports for the manual cloud smoke test.
 pub mod smoke {
     pub use crate::asr::{create, Input, Provider};
+    pub use crate::settings::Credentials;
 }
 mod capture;
 mod config;
@@ -43,11 +44,15 @@ pub struct RawSettings {
     pub provider: *const c_char,
     pub activation_msec: i32,
     pub notification_timeout: i32,
-    pub debounce_count: i32,
+    pub buffer_ms: i32,
     pub denoise: i32,
     pub lufs_target: f64,
     pub speex_level: i32,
     pub crest_threshold: f64,
+    pub qwen_api_key: *const c_char,
+    pub qwen_model: *const c_char,
+    pub doubao_api_key: *const c_char,
+    pub doubao_model: *const c_char,
 }
 
 /// Owned handle returned to C.
@@ -68,6 +73,18 @@ unsafe fn copy_out(text: &str, buf: *mut c_char, len: usize) -> i32 {
     std::ptr::copy_nonoverlapping(bytes.as_ptr(), buf as *mut u8, bytes.len());
     *buf.add(bytes.len()) = 0;
     bytes.len() as i32
+}
+
+unsafe fn read_c_string(ptr: *const c_char, fallback: &str) -> String {
+    if ptr.is_null() {
+        return fallback.to_string();
+    }
+    let value = CStr::from_ptr(ptr).to_string_lossy().into_owned();
+    if value.is_empty() {
+        fallback.to_string()
+    } else {
+        value
+    }
 }
 
 #[no_mangle]
@@ -110,23 +127,31 @@ pub extern "C" fn ainput_engine_set_settings(
     if engine.is_null() || raw.is_null() {
         return;
     }
-    let raw = unsafe { &*raw };
-    let provider = if raw.provider.is_null() {
-        "qwen".to_string()
-    } else {
-        unsafe { CStr::from_ptr(raw.provider) }
-            .to_string_lossy()
-            .into_owned()
+    // SAFETY: the shell owns every string for the duration of this call.
+    let (provider, credentials) = unsafe {
+        let raw = &*raw;
+        (
+            read_c_string(raw.provider, "qwen"),
+            settings::Credentials {
+                qwen_api_key: read_c_string(raw.qwen_api_key, ""),
+                qwen_model: read_c_string(raw.qwen_model, ""),
+                doubao_api_key: read_c_string(raw.doubao_api_key, ""),
+                doubao_model: read_c_string(raw.doubao_model, ""),
+            },
+        )
     };
+    // SAFETY: `raw` was checked non-null above.
+    let raw = unsafe { &*raw };
     let settings = Settings {
         provider: provider.clone(),
         activation_msec: raw.activation_msec,
         notification_timeout: raw.notification_timeout,
-        debounce_count: raw.debounce_count,
+        buffer_ms: raw.buffer_ms,
         denoise: Denoise::from_i32(raw.denoise),
         lufs_target: raw.lufs_target,
         speex_level: raw.speex_level,
         crest_threshold: raw.crest_threshold,
+        credentials,
     };
     engine::set_current_provider(&provider);
     let handle = unsafe { &*engine };
@@ -282,9 +307,6 @@ pub extern "C" fn ainput_migrate_legacy_config(
         if let Some(v) = ui.get("notification_timeout").and_then(|v| v.as_i64()) {
             settings.notification_timeout = v as i32;
         }
-        if let Some(v) = ui.get("debounce_count").and_then(|v| v.as_i64()) {
-            settings.debounce_count = v as i32;
-        }
     }
     if let Some(audio) = value.get("audio") {
         if let Some(v) = audio.get("denoise").and_then(|v| v.as_str()) {
@@ -309,7 +331,6 @@ pub extern "C" fn ainput_migrate_legacy_config(
         (*out).provider = provider.as_ptr();
         (*out).activation_msec = settings.activation_msec;
         (*out).notification_timeout = settings.notification_timeout;
-        (*out).debounce_count = settings.debounce_count;
         (*out).denoise = match settings.denoise {
             Denoise::None => 0,
             Denoise::Speexdsp => 1,

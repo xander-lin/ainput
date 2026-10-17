@@ -160,6 +160,9 @@ fcitx5 -r
 **提示 recognition queue full。** 同时最多接受 3 次录音，等
 `recognizing...` 结束即可。
 
+**每句话的结尾被截掉了。** 把 **BufferMs** 调大（送音有突发性的设备 200–400 ms
+通常有效）。反过来，如果松开按键后要等很久才开始识别，就把它调小。
+
 **fcitx5-configtool 里看不到 Ainput 的设置。** 确认插件已成功加载过（重启一次
 fcitx5），且 configtool 与 fcitx5 版本一致。设置保存在
 `~/.config/fcitx5/conf/ainput.conf`。

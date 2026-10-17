@@ -12,6 +12,7 @@ use serde_json::{json, Value};
 use super::{Input, Provider};
 use crate::config;
 use crate::error::{Category, Error, Result};
+use crate::settings::Credentials;
 use crate::http::{self, Response, TransportError};
 use crate::templates;
 
@@ -35,7 +36,7 @@ struct Settings {
 }
 
 impl Settings {
-    fn load() -> Result<Self> {
+    fn load(credentials: &Credentials) -> Result<Self> {
         config::read_or_seed("doubao.json", templates::doubao);
         let value = match config::read_json("doubao.json") {
             Ok(Some(value)) => value,
@@ -52,23 +53,24 @@ impl Settings {
             return Err(Error::config_invalid(issue.message.clone()));
         }
 
-        let api_key = value
+        let file_key = value
             .get("api_key")
             .and_then(Value::as_str)
-            .unwrap_or_default()
-            .trim()
-            .to_string();
+            .unwrap_or_default();
+        let api_key = Credentials::value(&credentials.doubao_api_key)
+            .or_else(|| Credentials::value(file_key))
+            .ok_or_else(|| {
+                Error::config_missing(
+                    "fill DoubaoApiKey in fcitx5-configtool, or api_key in                      ~/.config/ainput/doubao.json",
+                )
+            })?;
+
         let resource_id = value
             .get("resource_id")
             .and_then(Value::as_str)
             .unwrap_or_default()
             .trim()
             .to_string();
-        if api_key.is_empty() || api_key == config::PLACEHOLDER_KEY {
-            return Err(Error::config_missing(
-                "fill api_key in ~/.config/ainput/doubao.json",
-            ));
-        }
         if resource_id.is_empty() {
             return Err(Error::config_missing(
                 "fill resource_id in ~/.config/ainput/doubao.json",
@@ -78,12 +80,16 @@ impl Settings {
         Ok(Self {
             api_key,
             resource_id,
-            model_name: value
-                .get("model_name")
-                .and_then(Value::as_str)
-                .filter(|s| !s.is_empty())
-                .unwrap_or("bigmodel")
-                .to_string(),
+            model_name: Credentials::value(&credentials.doubao_model)
+                .or_else(|| {
+                    Credentials::value(
+                        value
+                            .get("model_name")
+                            .and_then(Value::as_str)
+                            .unwrap_or_default(),
+                    )
+                })
+                .unwrap_or_else(|| "bigmodel".to_string()),
             enable_itn: value
                 .get("enable_itn")
                 .and_then(Value::as_bool)
@@ -190,7 +196,7 @@ fn message_of(body: &Value, headers: &Response, fallback: &str) -> String {
 
 impl Provider for Doubao {
     fn transcribe(&self, input: &Input<'_>) -> Result<String> {
-        let settings = Settings::load()?;
+        let settings = Settings::load(&input.credentials)?;
         if input.cancel.load(Ordering::Relaxed) {
             return Err(Error::timeout("cancelled"));
         }

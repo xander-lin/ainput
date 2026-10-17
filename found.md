@@ -437,3 +437,36 @@
     discovery path; prefer that over deleting or over a marker file elsewhere.
   - Editing `~/.config/fcitx5/conf/*.conf` while fcitx5 runs is pointless: it
     rewrites the file on exit. Stop fcitx5 first, then edit, then start.
+
+## 17. A tested feature that was never wired into production (found 2026-10)
+
+- **Mistake/context**: The project shipped hardware-buffer auto-detection:
+  `buffer_detect.cpp` recorded 6 s, clustered read latencies to find the
+  device's burst period, cached the result per PulseAudio source in
+  `~/.cache/ainput/pa_buffer.json`, and had its own unit test plus a
+  `test_audio_pipeline` tool printing the detected value. A user asked where
+  that cache file was on their machine. It did not exist: `~/.cache/ainput`
+  was absent, and the cache was never written. `loadOrDetectBufferBytes()` had
+  exactly three callers — the test and the tool. The production capture path
+  had `attr.fragsize = 3200;` hard-coded.
+- **Root cause**: The detection was developed in isolation and validated
+  against itself. The test asserted that the cache migrates and round-trips,
+  which it did; nothing asserted that the *capture path consumes the value*.
+  A green test suite therefore described a code path production never took,
+  and the docs described a cache file that was never created.
+- **Correction**: Removed auto-detection entirely and made the fragment size an
+  explicit setting (`BufferMs`, default 100 ms = the old hard-coded 3200
+  bytes), passed shell → Rust settings → `pa_buffer_attr.fragsize`, logged as
+  `audio/capture_buffer` with both the requested ms and the computed bytes.
+  The value is clamped to 20–1000 ms.
+- **Prevention**:
+  - A test proves a component works; it does not prove production uses the
+    component. For every feature, grep for callers **outside** `tests/` and
+    `tools/` before claiming the feature exists.
+  - Retrieval/derivation code should log the value it actually applied at the
+    point of use (`capture_buffer` here). Absent that log, an unwired feature
+    is invisible even to a user who goes looking for its output.
+  - When documentation names an artefact a user can find on disk (cache file,
+    log, socket), that artefact must be reproduced on a clean machine during
+    review. "It is written by `detectHardwareBurstBytes`" was true and
+    irrelevant.

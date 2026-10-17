@@ -174,6 +174,10 @@ its own message (`fill api_key in ...`, `API key rejected`, `network error`,
 **Recognition queue full.** At most three recordings are accepted at once.
 Wait for `recognizing...` to finish.
 
+**The end of a phrase gets cut off.** Raise **BufferMs** in fcitx5-configtool
+(200–400 ms helps on devices that deliver audio in bursts). Lower it instead if
+recognition starts noticeably late after you stop speaking.
+
 **Settings don't appear in fcitx5-configtool.** The addon must have loaded at
 least once (restart fcitx5), and `fcitx5-configtool` must be from the same
 fcitx5 version. Settings are stored in `~/.config/fcitx5/conf/ainput.conf`.
