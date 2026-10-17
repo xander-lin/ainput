@@ -481,7 +481,7 @@ private:
         }
     }
 
-    // 长按 500ms 后触发
+    // 按住达到配置的 activation_msec（默认 300ms）后触发
     void onActivate() {
         reapFinishedCaptures();
         timer_.reset();

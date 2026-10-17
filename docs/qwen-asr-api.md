@@ -14,8 +14,8 @@ Ainput 的 `qwen` provider 通过 DashScope multimodal 同步接口调用阿里�
 | `fun-asr-flash-2026-06-15` | 当前 | ≤5 分钟 / ≤2GB | 官方对 `qwen3-asr-flash` 系列的替代，按秒计费 |
 | `qwen3-asr-flash` | 旧（逐步下线中） | ≤5 分钟 / ≤10MB | 2026-07 起其最新快照已下线，仍可用但不要再新建业务 |
 
-长音频异步转写（`*-filetrans`、`fun-asr`）是提交+轮询模式，不属于语音输
-入场景，Ainput 不使用。
+`fun-asr-flash` 是同步短音频接口；长音频的 `*-filetrans` 与异步 `fun-asr`
+是提交+轮询模式，不属于语音输入场景，Ainput 不使用。
 
 ## 配置
 
@@ -47,8 +47,10 @@ Ainput 的 `qwen` provider 通过 DashScope multimodal 同步接口调用阿里�
 | `vocabulary_id` | 不启用 | 控制台预编译热词表 ID |
 | `timeout_sec` | `60` | 整个请求的 curl 超时 |
 
-`format`/`sample_rate` 描述 Ainput 自身录音管线（16 kHz 单声道 WAV），
-固定发送，不可配置。
+新格式中 `format`/`sample_rate` 描述 Ainput 自身录音管线（16 kHz 单声道
+WAV），固定发送，不可配置。旧格式（`qwen3-asr-flash` 系列）不发送这两个
+字段。配置键 `speaker_diarization` 在新格式请求中的线字段名是
+`speaker_diarization_enabled`。
 
 ## 请求格式
 

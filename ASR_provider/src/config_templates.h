@@ -23,9 +23,9 @@ inline const char *configJsonTemplate() {
     //     "debounce_count": 2            // 按键释放去抖采样数
     // },
 
-    // ===== 采集管线(全部为默认值) =====
+    // ===== 采集管线(除 denoise 外均为默认值; denoise 默认关闭) =====
     // "audio": {
-    //     "denoise": "speexdsp",         // "speexdsp" | "deepfilter" | "none"
+    //     "denoise": "speexdsp",         // "speexdsp" | "deepfilter" | "none"; 默认不降噪
     //     "lufs_target": -16.0,          // 响度归一化目标
     //     "speex_level": -15,            // speexdsp 抑制强度(dB)
     //     "crest_threshold": 2.4         // 电平门限; 0 = 关闭

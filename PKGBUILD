@@ -34,6 +34,7 @@ package() {
     cd "$_pkgname"
     DESTDIR="$pkgdir" meson install -C build
     install -Dm644 README.md "$pkgdir/usr/share/doc/$_pkgname/README.md"
+    install -Dm644 README.zh-CN.md "$pkgdir/usr/share/doc/$_pkgname/README.zh-CN.md"
     install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$_pkgname/LICENSE"
     # No /etc layer: defaults live in code, user files are optional and sparse.
     # Shipped examples carry comments and document every field.

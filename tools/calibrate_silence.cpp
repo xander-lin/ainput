@@ -21,7 +21,7 @@ struct FrameStats {
     double crest; // peak / rms
 };
 
-// 与 audio_capture.cpp:353-386 完全一致的响度归一化逻辑
+// 与 AudioCapture::normalizeSamples() 一致的响度归一化逻辑
 static double normalizeSamples(std::vector<int16_t> &samples, double lufsTarget = -16.0) {
     ebur128_state *ebur = ebur128_init(1, 16000, EBUR128_MODE_I);
     ebur128_add_frames_short(ebur, samples.data(), samples.size());
@@ -222,7 +222,7 @@ int main(int argc, char **argv) {
     printf("\n如果当前阀值在本环境不合适:\n");
     printf("  - 背景噪声被误判为语音 → 提高 crest_threshold\n");
     printf("  - 实际语音被误判为静音 → 降低 crest_threshold\n");
-    printf("\n调整方法: 编辑 ~/.config/ainput/audio.json 中 crest_threshold 的值\n");
+    printf("\n调整方法: 编辑 ~/.config/ainput/config.json 的 [audio] 段中 crest_threshold 的值\n");
 
     return 0;
 }

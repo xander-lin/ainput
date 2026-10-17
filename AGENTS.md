@@ -78,6 +78,28 @@ who want fast push-to-talk dictation without leaving the keyboard.
   cancellation is cooperative via `std::atomic_bool`.
 - JSON parsing in providers is intentionally dependency-free (string find /
   manual extraction). Keep it minimal but robust to field order.
+- Documentation is one file per topic, not one file per phase of work:
+  - `README.md` (English) / `README.zh-CN.md` (Chinese) — project introduction,
+    install, usage, provider table, quick config. Keep engineering detail out;
+    keep both languages in sync.
+  - `docs/configuration.md` — every config key, default, validation, migration.
+  - `docs/architecture.md` — module boundaries, data flow, provider contract,
+    how to add a backend.
+  - `docs/development.md` — build, tests, tools, diagnostics, repository
+    tracking rules.
+  - `docs/history.md` — archive: dated failure analysis plus the chronological
+    log that used to be `FINDINGS.md`. Never present it as the current design.
+  - `docs/qwen-asr-api.md`, `docs/doubao-auc-api.md` — vendor API notes.
+- Do not reintroduce per-module readmes, `WhyThisArchWork.md` files, or a
+  generic fcitx5 tutorial set; those were merged or removed in 2026-10.
+- Durable claims (archive name, download size, config path, default value,
+  test count) are verified against the code or the upstream API before they
+  ship. See `found.md` #12.
+- Commit source, build files, packaging files, tests, tools, `config/*.example`,
+  `docs/`, `README*`, `LICENSE`, `AGENTS.md`, `found.md`. Never commit build
+  output, `compile_commands.json`, runtime `config/*.json`, `~/.config` or
+  `~/.cache` contents, models, diagnostic logs, or editor/IDE state
+  (`.idea/`, `.vscode/`). The full list is in `docs/development.md`.
 - Build: meson (`meson.build`, `meson_options.txt`, per-dir `meson.build`).
   Packaging: PKGBUILD (Arch). Verification: `ninja -C build` + tests under
   `tests/`. Meson install carries the fcitx5 addon files **and** the udev
@@ -111,8 +133,11 @@ who want fast push-to-talk dictation without leaving the keyboard.
   offer to remove the old package. Declaring `provides`/`conflicts` against a
   name that has no package and no dependents is dead metadata — add the pair
   only when a stable non-`-git` package actually exists.
-- Docs live in `docs/` (`qwen-asr-api.md` etc.), accumulated engineering notes
-  in `FINDINGS.md` (historical, at repo root).
+- Docs are topic-based: `docs/configuration.md`, `docs/architecture.md`,
+  `docs/development.md`, `docs/history.md`, plus vendor notes
+  (`docs/qwen-asr-api.md`, `docs/doubao-auc-api.md`). `docs/history.md` is an
+  archive (dated analysis + old engineering log) and must never be presented
+  as the current design.
 
 ## Current Cloud Model Status (verified 2026-10)
 

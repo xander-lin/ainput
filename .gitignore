@@ -1,11 +1,26 @@
+# Build output
 build/
 builddir/
-.venv/
-/pkg/
-/src/
-*.pkg.tar.*
 compile_commands.json
-config/*.json
-log.txt
+pkg/
+src/
+*.pkg.tar.*
 out/
+log.txt
+
+# Python environments and caches
+.venv/
+__pycache__/
+*.pyc
+
+# Runtime configuration: only config/*.example is tracked
+config/*.json
+
+# Editor / IDE state
+.idea/
+.vscode/
+*.swp
+*~
+
+# Local tool state
 .cortexkit/

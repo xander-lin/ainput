@@ -11,7 +11,8 @@
         "debounce_count": 2            // key-release debounce samples
     },
 
-    // Capture pipeline. crest_threshold=0 keeps aggressive level gating off.
+    // Capture pipeline. The code default is denoise off (leave the key out);
+    // the value below is an example. crest_threshold=0 disables level gating.
     "audio": {
         "denoise": "speexdsp",         // "speexdsp" | "deepfilter" | "none"
         "lufs_target": -16.0,          // loudness target for gain normalization

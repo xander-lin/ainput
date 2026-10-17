@@ -1,5 +1,5 @@
 .\" Man page for fcitx5-ainput
-.TH ainput 1 "2026-07-28" "0.1.0" "fcitx5-ainput"
+.TH ainput 1 "2026-10-17" "0.1.0" "fcitx5-ainput"
 .SH NAME
 fcitx5\-ainput \- voice input addon for fcitx5
 .SH SYNOPSIS
@@ -32,7 +32,7 @@ input-panel error when that limit is reached.
 Enter provider/denoiser switching mode. The notification shows the
 provider's display name with the currently configured model (for example
 \fBQwen · qwen-audio-3.1-asr-flash\fP, \fBDoubao · bigmodel\fP, or
-\fBZipformer · <model-dir> (local)\fP), read from the provider's config
+\fBZipformer · <model-dir-basename> (local)\fP), read from the provider's config
 file. While holding CapsLock:
 .br
 \fB\(<- / h\fP  \-\- previous ASR provider
@@ -49,13 +49,17 @@ Every file supports // line comments.
 \fBconfig.json\fP, \fBqwen.json\fP and \fBdoubao.json\fP self-heal:
 whenever a read finds them missing, a commented template is regenerated
 (mode 0600) -- rename one away to get a fresh template. Seeded credentials
-carry a PASTE_YOUR_KEY_HERE placeholder that counts as not configured. Every provider config is re-read
-before each recognition; model and parameter changes apply on the next
-recording without restarting fcitx5.
+carry a PASTE_YOUR_KEY_HERE placeholder that counts as not configured.
+Cloud provider configs (qwen.json, doubao.json) are re-read before each
+recognition, so model and parameter changes apply on the next recording
+without restarting fcitx5. Local provider configs (zipformer.json,
+fire_red.json) are read when the provider is created; switch provider away
+and back, or restart fcitx5, after editing them.
 Every file is validated on read: JSON syntax errors (with byte offset) are
-shown in the input panel and the file's values are not trusted; unknown
-fields get a "did you mean" suggestion and type mismatches are named in the
-fcitx5 log and the provider switch notification.
+logged and the file's values are not trusted; unknown fields get a "did you
+mean" suggestion and type mismatches are named in the fcitx5 log, with the
+first provider-file issue repeated as a warning line in the switch
+notification.
 .SS Global
 .TP
 \fBconfig.json\fP
@@ -68,7 +72,8 @@ login starts with.
     // qwen | doubao | zipformer | fire_red | mock
     "provider": "qwen",
     "ui":    { "activation_msec": 300 },
-    "audio": { "denoise": "speexdsp", "crest_threshold": 0 }
+    // denoise is off by default; add "denoise": "speexdsp" to enable it
+    "audio": { "crest_threshold": 2.4 }
 }
 .fi
 .RE
@@ -110,10 +115,12 @@ Local FireRed tuning: \fBmodel_dir\fP, \fBbin_path\fP, \fBtimeout_sec\fP.
 Returns "hello world" immediately. For testing without network.
 .TP
 \fBZipformer\fP (sherpa-onnx)
-Local offline model (~100MB). Requires \fBsherpa-onnx\fP binary.
+Local streaming model (about 490 MB download). Requires the
+\fBsherpa-onnx\fP binary and the model file set named in the README.
 .TP
 \fBFireRed\fP (sherpa-onnx-offline)
-Local offline AED model (~1.2GB). Requires \fBsherpa-onnx-offline\fP binary.
+Local offline AED model (about 800 MB download). Requires the
+\fBsherpa-onnx-offline\fP binary.
 .TP
 \fBDoubao\fP (ByteDance Volcengine)
 Cloud API. Requires \fBdoubao.json\fP with API key and resource ID.
@@ -126,7 +133,7 @@ Recorded audio goes through:
 .nf
 PulseAudio capture
   \(-> ebur128 loudness normalization (-16 LUFS)
-  \(-> denoising (speexdsp or deepfilter)
+  \(-> denoising (speexdsp or deepfilter; only when enabled)
   \(-> VAD-based silence trimming
   \(-> WAV output
   \(-> ASR recognition
@@ -145,8 +152,23 @@ run one local process per utterance.
 .I ~/.config/ainput/
 Configuration directory.
 .TP
-.I ~/.config/ainput/pa_buffer.json
-Auto-detected PulseAudio buffer size (created automatically).
+.I ~/.cache/ainput/pa_buffer.json
+Auto-detected PulseAudio buffer sizes, keyed by source id (state, not
+configuration; created automatically).
+.TP
+.I ~/.local/share/ainput/
+Optional local ASR binaries (
+.IR sherpa-onnx/bin/ )
+and models (
+.IR models/ );
+the exact layout is described in the project README.
+.TP
+.I ~/.local/share/ainput/diagnostic.log
+Developer diagnostic log; only written by builds configured with
+\fB-Ddiagnostic_logging=true\fP.
+.TP
+.I /usr/share/doc/fcitx5-ainput/config/
+Commented configuration examples shipped by the package.
 .TP
 .I /usr/lib/fcitx5/ainput.so
 Addon shared library.
@@ -154,6 +176,6 @@ Addon shared library.
 .I /usr/share/fcitx5/addon/ainput.conf
 Addon manifest.
 .SH BUGS
-Report issues at the project repository.
+Report issues at https://github.com/xander-lin/ainput/issues.
 .SH SEE ALSO
 .BR fcitx5 (1)

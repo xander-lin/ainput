@@ -51,8 +51,10 @@
 
 ## 3. JSON property removal needs comma/whitespace bookkeeping (found 2026-10)
 
-- **Mistake/context**: `qjsonRemoveTopLevelProperty` (used to strip `api_key`
-  after keyring import) initially removed only the key/value span, leaving
+- **Mistake/context**: `qjsonRemoveTopLevelProperty` (written for stripping
+  `api_key` after a keyring import; that import path was since removed, but
+  the parsing lesson applies to any JSON text surgery) initially removed only
+  the key/value span, leaving
   either a double comma (middle property) or a blank line (first property in
   pretty-printed JSON) — the first variant produced invalid JSON.
 - **Root cause**: Deleting a JSON property means also deleting exactly one of
@@ -69,7 +71,8 @@
 
 ## 4. "Already clean" checks must be scope-aware (found 2026-10)
 
-- **Mistake/context**: `importConfigSecret` decided whether a config file
+- **Mistake/context**: `importConfigSecret` (the keyring-import step, since
+  removed with the secret store in 2026-10) decided whether a config file
   still needed its `api_key` stripped by searching for the key name anywhere
   in the file; a nested `vocabulary.api_key` made it think the file was
   dirty, the rewrite "failed", and the key was never cached.
@@ -84,6 +87,11 @@
 
 ## 5. Tests must isolate HOME from the installed /etc/vinput fallback (found 2026-10)
 
+> The `/etc/vinput` fallback layer described here was removed in 2026-10. The
+> lesson generalizes: any test that constructs a component reading global
+> config must own `HOME`, because the file that is read may live outside the
+> test's temp tree (today: a self-healing seed, previously: `/etc`).
+
 - **Mistake/context**: After the package was installed system-wide,
   `test_cloud_provider_queue` started making REAL HTTPS requests to
   DashScope (HTTP 401 InvalidApiKey): `readConfigFile` copies
@@ -95,8 +103,10 @@
   accounted for a packaged /etc being present on the build machine.
 - **Correction**: Tests that exercise cloud providers write their own
   qwen.json/doubao.json into the test HOME (empty key + unroutable
-  endpoint) and inject NullSecretStore; local-provider tests create the
-  model files the preflight requires.
+  endpoint). The secret-store injection (`NullSecretStore`) from that era no
+  longer exists — the keyring layer was removed in 2026-10 — so the file
+  contents alone decide whether a test can reach the network. Local-provider
+  tests create the model files the preflight requires.
 - **Prevention**: Any test touching `readConfigFile` must pre-create every
   config file it cares about inside its temp HOME; watch for test runtimes
   that jump (0.4s -> 0.01s here was the network disappearing).
@@ -111,8 +121,11 @@
 - **Root cause**: The restructure treated the breaking change as
   file-layout-only; user-owned values inside the removed file were treated
   as disposable, which is correct only for untouched defaults.
-- **Correction**: Manually merged the user's values into
-  `~/.config/ainput/audio.json` and trashed the stale `advanced.json`.
+- **Correction**: Manually merged the user's values into the then-current
+  `~/.config/ainput/audio.json` and trashed the stale `advanced.json`. (The
+  2026-10 restructure later folded `audio.json` into `config.json`'s
+  `[audio]` section; the lesson is about carrying values across a breaking
+  change, not about the filename.)
 - **Prevention**: When a breaking change removes or renames a config file,
   diff the user's file against the shipped example of the old version;
   anything that differs from the old default must be carried into the new
@@ -262,3 +275,73 @@
 
 
 
+## 12. Documentation sprawl produced instructions that could not work
+  (found 2026-10)
+
+- **Mistake/context**: A docs audit found both structural sprawl and factual
+  errors. Nine entry points covered five topics (`README.md`, per-module
+  `ASR_provider/README.md` and two `WhyThisArchWork.md`, `config/`,
+  `tests/`, `tools/` readmes, a `docs/README.md` index), and the user-facing
+  README carried build flags and module contracts. The audit also found text
+  describing a program that did not exist:
+  - The README's local-model section told users to download
+    `sherpa-onnx-zipformer-zh-en-2023-06-26.tar.bz2`, which returns **404**
+    (the asset never existed; the streaming archive is
+    `...-bilingual-zh-en-2023-02-20`), and told them to download
+    `sherpa-onnx-v1.13.2-linux-x64.tar.bz2`, also 404 (the release publishes
+    `-static`, `-shared`, and GPU variants).
+  - Both local models were listed as "~100MB" / "~1.2GB" when the real
+    downloads are ~490 MB / ~800 MB, and the man page and README disagreed on
+    where the buffer cache lives (`~/.config/ainput` vs `~/.cache/ainput`).
+  - The addon manifest declared `Configurable=True` while the addon has no
+    `getConfig()`, so fcitx5-configtool offered an empty Ainput page.
+  - The dated failure analysis presented Hyprland-only code as current months
+    after `dfd0d55` deleted the compositor branches, and a copy of a generic
+    fcitx5 CMake/fcitx-config tutorial sat next to project docs with no
+    warning that this project uses Meson and its own JSON config.
+  - `tests/README.md` described 3 of 11 tests; `tools/README.md` omitted
+    `test_uinput_caps` and gave no `tail_loss_test` flags.
+  - There was no Chinese README, and tracked `.idea/` files carried one
+    machine's IDE settings.
+- **Root cause**: Two failures with one shared cause — no ownership and no
+  verification. (a) Nothing ever executed the download URLs, compared config
+  paths against the code, or counted registered tests, so claims drifted
+  freely. (b) Every topic was restated several times, so the copies disagreed
+  and no single file was authoritative.
+- **Correction**: Verified every factual claim against the tree and the
+  upstream GitHub releases API (`gh api .../releases/tags/asr-models`, asset
+  sizes, tar listings) and rewrote the wrong parts. The streaming download was
+  executed end to end: `sherpa-onnx` with
+  `--encoder/--decoder/--joiner/--tokens` recognized a test WAV.
+  Structure was then collapsed to one file per topic:
+  `docs/architecture.md` (module boundaries + provider contract),
+  `docs/configuration.md`, `docs/development.md` (build/test/tools/diagnostics
+  **and** what to commit), `docs/history.md` (dated analysis + old log, with a
+  status table), plus the two vendor notes. The per-module readmes,
+  `WhyThisArchWork.md` files, `docs/README.md`, and the generic fcitx5 tutorial
+  set were deleted. `scripts/test_ws_server.py` and `scripts/df_denoise.py`
+  belonged to designs the code no longer has and were removed. `README.md` was
+  cut back to project introduction (no engineering detail) and translated to
+  `README.zh-CN.md`. `Configurable=True` became `False`, and tracked `.idea/`
+  state was untracked and ignored.
+- **Prevention**:
+  - One file per topic. Adding a second file that restates an existing table
+    is the bug — extend the owner instead, and link rather than copy.
+  - User-facing docs stay user-facing: build flags, module contracts, and
+    repository conventions belong in `docs/development.md` / `docs/architecture.md`.
+  - Keep `README.md` and `README.zh-CN.md` structurally identical (same
+    headings, same order) so a change to one is obviously a change to both.
+  - Every document is either current or explicitly archived under
+    `docs/history.md`. Nothing is both.
+  - Check tracked files against the `docs/development.md` list before
+    committing; IDE state (`.idea/`, `.vscode/`) and runtime config never
+    belong in the repository.
+  - Any doc that names an external archive, URL, or default value must be
+    checked against the upstream API or the code before it ships — a plausible
+    name is not a valid asset name.
+  - Configuration paths are code facts: `grep` the reader (`configDir()`,
+    buffer cache, diagnostic log) instead of copying the previous doc.
+  - Documentation that describes tests or tools must list what Meson actually
+    registers (`tests/meson.build`, `tools/meson.build`).
+  - Prefer a short pointer to the authoritative file over duplicating a table
+    that will drift; where duplication is unavoidable, verify both copies.

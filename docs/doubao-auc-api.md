@@ -1,5 +1,11 @@
 # 豆包录音文件识别 API
 
+> **Ainput 的实际用法**：下面的 `audio.url` 是厂商文档中的公网链接方式；
+> Ainput 不上传公网 URL，而是把本地 WAV 以 base64 内联在
+> `audio.data` 字段中提交（`format: "wav"`）。`enable_itn` / `enable_punc`
+> 由 `doubao.json` 控制，默认都为 `true`（与厂商“默认 false”不同），
+> 并且每次请求都会显式发送。
+
 大模型录音文件识别服务的处理流程分为提交任务和查询结果两个阶段：
 - **任务提交**：提交音频链接，获取服务端分配的任务 ID
 - **结果查询**：通过任务 ID 查询转写结果
@@ -27,7 +33,7 @@
 
 | 字段 | 说明 | 必填 |
 |------|------|------|
-| audio.url | 音频链接 | ✓ |
+| audio.url | 音频链接（Ainput 改用 `audio.data` 内联 base64，二选一） | ✓ |
 | audio.format | 音频容器格式：raw/wav/mp3/ogg | ✓ |
 | audio.codec | 音频编码：raw/opus，默认 raw(pcm) | |
 | audio.rate | 采样率，默认 16000 | |

@@ -5,7 +5,7 @@ Version=@PROJECT_VERSION@
 Library=ainput
 Type=SharedLibrary
 OnDemand=False
-Configurable=True
+Configurable=False
 
 [Addon/Dependencies]
 0=notifications

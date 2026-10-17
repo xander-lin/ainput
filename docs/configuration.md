@@ -1,8 +1,11 @@
-# Configuration
+# Configuration Reference
 
 Everything user-editable lives in `~/.config/ainput/`. Defaults are built into
 the code — files are **optional and sparse**: create only what you want to
 change, copy nothing you don't. `//` line comments are allowed in every file.
+
+Repository examples live in `config/*.example`; they are documentation, not
+runtime files.
 
 ```
 ~/.config/ainput/
@@ -25,12 +28,15 @@ work with built-in defaults once the models are installed.
 Seeded credential templates carry `"api_key": "PASTE_YOUR_KEY_HERE"`, which
 counts as *not configured*: recognition fails with
 `Ainput: fill api_key in ~/.config/ainput/qwen.json` until you replace it.
+The tracked `config/*.example` files use the same placeholder, so copying an
+example and forgetting to edit it gives the same actionable message.
 The first recognition on a fresh install therefore walks the user straight
 to a self-documenting file — no manual hunting for docs.
 
-There is no `/etc/vinput` layer and no pacnew dance. The auto-detected device
-buffer cache moved to `~/.cache/ainput/pa_buffer.json` — it is state, not
-configuration, and regenerates itself.
+There is no system-wide `/etc` default layer and no pacnew dance: package
+upgrades never touch user files. The auto-detected device buffer cache lives
+in `~/.cache/ainput/pa_buffer.json` — it is state, not configuration, and
+regenerates itself.
 
 ## Boundary (repo side)
 
@@ -41,11 +47,11 @@ configuration, and regenerates itself.
 
 | Key | Default | Purpose |
 |-----|---------|---------|
-| `provider` | (required) | Active ASR backend: `qwen` \| `doubao` \| `zipformer` \| `fire_red` \| `mock`. `Ctrl+CapsLock` switching rewrites this line |
+| `provider` | `qwen` | Active ASR backend: `qwen` \| `doubao` \| `zipformer` \| `fire_red` \| `mock`. Missing or empty falls back to `qwen`; the schema still warns about a missing key. `Ctrl+CapsLock` switching rewrites this line |
 | `ui.activation_msec` | `300` | How long CapsLock must be held |
 | `ui.notification_timeout` | `2000` | Switch notification duration (ms) |
 | `ui.debounce_count` | `2` | Key-release debounce samples |
-| `audio.denoise` | (auto) | `speexdsp` \| `deepfilter` \| `none` |
+| `audio.denoise` | *(unset = none)* | `speexdsp` \| `deepfilter` \| `none`. `deepfilter` needs `~/.local/share/ainput/bin/deep-filter` |
 | `audio.lufs_target` | `-16.0` | Loudness target for gain normalization |
 | `audio.speex_level` | `-15` | speexdsp suppression level (dB) |
 | `audio.crest_threshold` | `2.4` | Crest-based speech gate; `0` disables |
@@ -111,27 +117,41 @@ validation and parsing (string-aware, byte offsets preserved), so
 Every config file is validated on read against a schema
 (`ASR_provider/src/config_schema.h`):
 
-- JSON syntax errors are pinpointed with a byte offset and reported in the
-  input panel (`Ainput: config.json: ...`), and the file's values are not
-  trusted (defaults apply).
+- JSON syntax errors are pinpointed with a byte offset. They are written to
+  the fcitx5 log; for a provider file they also reach the input panel on the
+  next recognition as `Ainput: Qwen: qwen.json: ...`. A malformed file's
+  values are not trusted (defaults apply).
 - Unknown or misspelled fields get a "did you mean" suggestion
   (`"modelname" (did you mean "model"?)`), type mismatches are named
   (`field "timeout_sec" expects an integer`), and missing required fields are
-  reported — these warnings go to the fcitx5 log and are appended to the
-  provider switch notification (`Ctrl+CapsLock`) as a `⚠` line.
+  reported — these warnings go to the fcitx5 log, and the first one is also
+  appended to that provider's switch notification (`Ctrl+CapsLock`) as a
+  `⚠` line.
 - Retired fields (e.g. `request_style`, `max_polls`, `num_threads`) are
   flagged as unknown so stale files tell you they do nothing.
 
 Cloud provider configs are re-read on the worker thread before every
 recognition, so model/parameter changes take effect on the next recording
-without restarting fcitx5. (Breaking changes 2026-10: `advanced.json` was
-split per provider; `vinput.json` + `audio.json` merged into `config.json`;
-the `/etc/vinput` default layer, the fcitx5 `DefaultProvider` option and the
-tuning knobs above were removed.)
+without restarting fcitx5. Local provider configs (`zipformer.json`,
+`fire_red.json`) are read when the provider object is created; after editing
+one, switch provider away and back with `Ctrl+CapsLock` or restart fcitx5.
+
+### Migration notes (2026-10)
+
+Files from the older layout are no longer read. If you upgraded from it:
+
+- `advanced.json` → its keys were split into the per-provider files and
+  `config.json`'s `[audio]` section.
+- `vinput.json` and `audio.json` → merged into `config.json`.
+- A system-wide `/etc` default layer, the fcitx5 `DefaultProvider` option,
+  and the `request_style` / `max_polls` / `num_threads` knobs were removed;
+  the remaining knobs are the ones in the tables above.
+- `pa_buffer.json` moved from `~/.config/ainput/` to `~/.cache/ainput/`
+  (it is state, not configuration).
 
 ## Update Rule
 
 When adding a new runtime config key, update the relevant `.example`, this
-README, the user-facing configuration section in `README.md`, and the schema
-in `ASR_provider/src/config_schema.h` — schemas live next to the module and
-must change together with the readers.
+document, the quick-start section in both README files, and the schema in
+`ASR_provider/src/config_schema.h` — schemas live next to the module and must
+change together with the readers.
