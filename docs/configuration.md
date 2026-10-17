@@ -68,8 +68,10 @@ exposed because there is nothing to tune and nothing to detect:
   when the stream closes, so the tail loss is bounded by the fragment size.
   Smaller is therefore strictly better, at the cost of more wakeups — and the
   capture loop already polls every 2 ms, so the wakeup count is irrelevant.
-- The capture path drains for 150 ms after you release the key, which recovers
-  the final partial fragment as long as the drain outlasts the fragment.
+- Nothing is drained after you release the key. Measured: at the moment of
+  stop the delivered sample count equals the recording duration (0 ms in
+  flight, five trials), so waiting cannot recover audio — it only appends new
+  audio and delays recognition.
 
 The old "64K works, 4K loses the tail" problem came from `pa_simple_read`,
 which blocks until it has the full requested byte count. The current

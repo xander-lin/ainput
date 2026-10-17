@@ -32,24 +32,29 @@ const BYTES_PER_MS: u32 = 32;
 
 /// Fragment size requested from PulseAudio.
 ///
-/// Measured behaviour: the server delivers exactly this many bytes per wakeup,
-/// and discards any partial fragment still buffered when the stream closes.
-/// The tail loss is therefore bounded by this value, which makes smaller
-/// strictly better; the only cost is more wakeups (50/s here), and the capture
-/// loop already polls at 2 ms so that cost is not real. 20 ms keeps the loss
-/// imperceptible while staying well above the ~5 ms floor where PulseAudio
-/// starts rounding the request.
+/// The server delivers at most this many bytes per wakeup and the request is
+/// echoed back verbatim (measured: 6/10/20/50/100 ms requests all granted
+/// exactly), down to the ~5.4 ms hardware floor where it rounds up.
+/// It is not a setting: there is no per-device optimum, and the value only
+/// bounds how much audio can sit in a partial fragment at any instant.
 ///
-/// This is deliberately not a user setting: there is no per-device optimum to
-/// find, because the value is simply echoed back as the delivery size.
+/// 20 ms is chosen over the floor because it is 4x the measured floor (safe on
+/// slower devices) while keeping the capture loop at ~50 wakeups/second, which
+/// matters less than the 2 ms poll interval already in place.
 pub const BUFFER_MS: u32 = 20;
 /// How long to wait for the stream to reach READY before giving up.
 const READY_TIMEOUT: Duration = Duration::from_secs(3);
 /// Poll interval while recording; bounds stop latency.
 const POLL_INTERVAL: Duration = Duration::from_millis(2);
-/// Time spent draining already-buffered audio after a stop. Must exceed
-/// `BUFFER_MS`, otherwise the last fragment is never completed and is lost.
-pub const TAIL_DRAIN: Duration = Duration::from_millis(150);
+/// No drain after a stop.
+///
+/// Measured: with peek/discard, PulseAudio delivers audio as it arrives, so at
+/// the moment of stop the delivered sample count equals the recording
+/// duration (0 ms in flight, five trials). Draining for N ms therefore does
+/// not recover lost audio — it only appends N ms of *new* audio, padding every
+/// recording and delaying recognition. A 20 ms drain does complete one final
+/// fragment, but costs more latency than the fragment is worth for speech.
+pub const TAIL_DRAIN: Duration = Duration::from_millis(0);
 
 pub struct Captured {
     pub samples: Vec<i16>,

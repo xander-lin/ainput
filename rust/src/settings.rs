@@ -169,12 +169,12 @@ mod tests {
     #[test]
     fn capture_constants_are_consistent() {
         use crate::capture::{BUFFER_MS, TAIL_DRAIN};
-        // Buffered-but-incomplete audio is discarded at stop, so the loss is
-        // bounded by one fragment. The drain must therefore outlast it.
-        assert_eq!(BUFFER_MS, 20);
-        assert!(TAIL_DRAIN.as_millis() as u32 > BUFFER_MS);
         // 16 kHz mono S16 = 32 bytes per millisecond.
         assert_eq!(BUFFER_MS * 32, 640, "20 ms = 640 bytes");
+        assert!(BUFFER_MS >= 6, "must stay above the ~5.4 ms hardware floor");
+        // Measured: nothing is in flight at stop, so waiting cannot recover
+        // audio and would only pad the recording with new audio.
+        assert_eq!(TAIL_DRAIN, std::time::Duration::ZERO);
     }
 
     #[test]

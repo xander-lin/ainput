@@ -499,10 +499,17 @@
   The historical "64K ok, 4K loses the tail" split came from
   `pa_simple_read`, which blocks until the full byte count arrives — an I/O
   pattern the current peek/discard loop does not have.
-- **Correction**: Fragment size is a constant (`capture::BUFFER_MS = 20`), the
-  post-stop drain is 150 ms (must exceed one fragment, asserted by a test), and
-  the GUI option was removed. `audio/capture_buffer` logs the value actually
-  applied.
+- **Correction (second pass)**: The first attempt kept a 150 ms post-stop
+  drain, reasoning that a partial fragment must be completed. Measuring what
+  the drain actually yields killed that idea: for a 1000 ms recording, no drain
+  captured 1000 ms of audio, a 150 ms drain captured 1153 ms. Nothing is in
+  flight at stop (delivered samples == recording duration, five trials), so the
+  drain was not recovering anything — it was recording 150 ms of *new* audio,
+  padding every utterance and delaying recognition by the same amount. A 20 ms
+  drain does complete one final fragment (1047 ms captured) but buys ~20 ms of
+  tail for 20 ms of latency, which is a bad trade for speech.
+  Final state: `BUFFER_MS = 20`, `TAIL_DRAIN = 0`, GUI option removed,
+  `audio/capture_buffer` logs the value applied.
 - **Deeper finding (same day)**: the old detector's "hardware burst period" was
   an artefact. Reproducing its exact algorithm (`buffer_detect.cpp:171-290`) on
   this machine's timings yields **64000 bytes = 2.0 s** — the identical number
@@ -552,5 +559,10 @@
   - When a past fix is attributed to a device ("this USB mic needs 64K"), check
     whether the blocking I/O primitive was actually the cause before building a
     device model around it.
-  - A drain/flush window must be derived from, and tested against, the buffer
-    size it drains, or the last fragment silently disappears.
+  - Do not add a flush/drain window without measuring what it actually
+    recovers. "Drain for one buffer" sounds principled but can be pure padding:
+    here it recorded extra audio rather than retrieving lost audio, and the
+    only visible symptom would have been "recognition feels slow".
+  - Compare *content length to recording length* when validating a capture
+    pipeline. A mismatch of exactly the drain duration is the signature of
+    padding rather than recovery.
