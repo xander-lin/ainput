@@ -26,3 +26,9 @@ lto = true
 panic = "abort"
 codegen-units = 1
 strip = true
+
+# Per-stage timing for one dictation, no network. Run with:
+#   cargo run --release --example pipeline
+[[example]]
+name = "pipeline"
+path = "examples/pipeline.rs"

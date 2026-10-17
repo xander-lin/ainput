@@ -163,19 +163,25 @@ pub fn trim_silence(samples: &mut Vec<i16>) {
     }
     unsafe { dsp::speex_preprocess_state_destroy(state) };
 
-    let mut first = 0usize;
-    while first < frame_count && !voice[first] {
-        first += 1;
-    }
-    let mut last = frame_count;
-    while last > 0 && !voice[last - 1] {
-        last -= 1;
-    }
+    // Converging scan: the two edges meet in the middle instead of walking the
+    // whole array twice. Trivial next to the VAD itself, but it is the only
+    // part of the trimmer that is pure Rust.
+    let (first, last) = {
+        let mut first = 0usize;
+        let mut last = frame_count;
+        while first < last && !voice[first] {
+            first += 1;
+        }
+        while last > first && !voice[last - 1] {
+            last -= 1;
+        }
+        (first, last)
+    };
     if first >= last {
         return;
     }
-    first = first.saturating_sub(PAD_FRAMES);
-    last = (last + PAD_FRAMES).min(frame_count);
+    let first = first.saturating_sub(PAD_FRAMES);
+    let last = (last + PAD_FRAMES).min(frame_count);
 
     let mut start = first * FRAME_SIZE;
     let end = last * FRAME_SIZE;

@@ -168,29 +168,48 @@ fn build_body(settings: &Settings, data_uri: &str) -> Value {
     })
 }
 
+/// Standard base64 into a pre-sized buffer.
+///
+/// `chunks_exact` + `remainder()` rather than `as_chunks`: the latter is not
+/// available on the oldest toolchain this crate supports, and the remainder
+/// form makes the padding branch explicit.
+#[allow(clippy::chunks_exact_to_as_chunks)]
+///
+/// Writes bytes rather than `char`s: the old version pushed one `char` at a
+/// time through `String`, which re-validates UTF-8 per byte and showed up in
+/// the profile once the body grows with the recording length.
 fn base64_encode(data: &[u8]) -> String {
     const TABLE: &[u8; 64] =
         b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
-    for chunk in data.chunks(3) {
-        let b0 = chunk[0] as u32;
-        let b1 = *chunk.get(1).unwrap_or(&0) as u32;
-        let b2 = *chunk.get(2).unwrap_or(&0) as u32;
-        let triple = (b0 << 16) | (b1 << 8) | b2;
-        out.push(TABLE[(triple >> 18) as usize & 63] as char);
-        out.push(TABLE[(triple >> 12) as usize & 63] as char);
-        out.push(if chunk.len() > 1 {
-            TABLE[(triple >> 6) as usize & 63] as char
-        } else {
-            '='
-        });
-        out.push(if chunk.len() > 2 {
-            TABLE[triple as usize & 63] as char
-        } else {
-            '='
-        });
+    let mut out = Vec::with_capacity(data.len().div_ceil(3) * 4);
+    let mut chunks = data.chunks_exact(3);
+    for chunk in &mut chunks {
+        let triple =
+            ((chunk[0] as u32) << 16) | ((chunk[1] as u32) << 8) | chunk[2] as u32;
+        out.push(TABLE[(triple >> 18) as usize & 63]);
+        out.push(TABLE[(triple >> 12) as usize & 63]);
+        out.push(TABLE[(triple >> 6) as usize & 63]);
+        out.push(TABLE[triple as usize & 63]);
     }
-    out
+    match chunks.remainder() {
+        [] => {}
+        [b0] => {
+            let triple = (*b0 as u32) << 16;
+            out.push(TABLE[(triple >> 18) as usize & 63]);
+            out.push(TABLE[(triple >> 12) as usize & 63]);
+            out.extend_from_slice(b"==");
+        }
+        [b0, b1] => {
+            let triple = ((*b0 as u32) << 16) | ((*b1 as u32) << 8);
+            out.push(TABLE[(triple >> 18) as usize & 63]);
+            out.push(TABLE[(triple >> 12) as usize & 63]);
+            out.push(TABLE[(triple >> 6) as usize & 63]);
+            out.push(b'=');
+        }
+        _ => unreachable!("chunks_exact(3) leaves fewer than 3 bytes"),
+    }
+    // The alphabet is ASCII by construction.
+    String::from_utf8(out).unwrap_or_default()
 }
 
 fn extract_text(body: &Value) -> Option<String> {
@@ -261,6 +280,7 @@ impl Provider for Qwen {
             return Err(Error::timeout("cancelled"));
         }
 
+        let encode_started = std::time::Instant::now();
         let bytes = std::fs::read(input.wav_path)
             .map_err(|e| Error::audio_data(format!("cannot read WAV: {e}")))?;
         if bytes.len() <= 44 {
@@ -270,8 +290,10 @@ impl Provider for Qwen {
         let body = build_body(&settings, &data_uri);
         let body = serde_json::to_string(&body)
             .map_err(|e| Error::runtime(format!("cannot build request: {e}")))?;
+        let encode_ms = encode_started.elapsed().as_millis();
 
         let authorization = format!("Bearer {}", settings.api_key);
+        let network_started = std::time::Instant::now();
         let response = http::post_json(
             &settings.endpoint,
             &[("Authorization", authorization.as_str()), ("Accept", "application/json")],
@@ -289,7 +311,23 @@ impl Provider for Qwen {
             }
         })?;
 
+        let network_ms = network_started.elapsed().as_millis();
+
+        let parse_started = std::time::Instant::now();
         let parsed: Value = serde_json::from_str(&response.body).unwrap_or(Value::Null);
+        let parse_ms = parse_started.elapsed().as_millis();
+        // Stage timings, as the C++ version had. "Recognition is slow" is not
+        // actionable; knowing whether it was encode, network or parse is.
+        crate::diagnostic::event(
+            "asr",
+            "qwen_timing",
+            &[
+                ("encode_ms", encode_ms.to_string()),
+                ("network_ms", network_ms.to_string()),
+                ("parse_ms", parse_ms.to_string()),
+                ("request_bytes", body.len().to_string()),
+            ],
+        );
 
         if response.status != 200 {
             let code = parsed

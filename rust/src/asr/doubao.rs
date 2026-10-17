@@ -244,7 +244,12 @@ impl Provider for Doubao {
         }
 
         // ---- poll ----
-        let mut interval = Duration::from_millis(300);
+        //
+        // Query immediately, then back off. Sleeping first cost a fixed 300 ms
+        // on every recognition even when the transcript was ready by the time
+        // the submit response came back — which for short utterances is the
+        // common case.
+        let mut interval = Duration::ZERO;
         loop {
             if input.cancel.load(Ordering::Relaxed) {
                 return Err(Error::timeout("cancelled"));
@@ -252,8 +257,20 @@ impl Provider for Doubao {
             if Instant::now() >= deadline {
                 return Err(Error::timeout("Doubao recognition timed out"));
             }
-            std::thread::sleep(interval.min(deadline.saturating_duration_since(Instant::now())));
-            interval = Duration::from_millis(800);
+            if !interval.is_zero() {
+                let wait = interval.min(deadline.saturating_duration_since(Instant::now()));
+                if !wait.is_zero() {
+                    std::thread::sleep(wait);
+                }
+            }
+            // Start short, then settle: the first few hundred milliseconds are
+            // where a fast answer shows up, and after that polling faster than
+            // the server can finish only burns requests.
+            interval = if interval.is_zero() {
+                Duration::from_millis(120)
+            } else {
+                (interval * 2).min(Duration::from_millis(800))
+            };
 
             let query = http::post_json(
                 QUERY_URL,

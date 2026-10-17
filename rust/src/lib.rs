@@ -12,23 +12,24 @@
 
 mod asr;
 
-/// Minimal re-exports for the manual cloud smoke test.
+/// Minimal re-exports for the manual cloud smoke test and the benchmark
+/// binary (`rust/benches/pipeline.rs`). Not part of the C ABI.
 pub mod smoke {
     pub use crate::asr::{create, Input, Provider};
     pub use crate::settings::Credentials;
 }
 mod capture;
-mod config;
+pub mod config;
 mod diagnostic;
-mod dsp;
+pub mod dsp;
 mod engine;
 mod error;
 mod ffi;
-mod http;
-mod settings;
+pub mod http;
+pub mod settings;
 mod templates;
 mod uinput;
-mod wav;
+pub mod wav;
 
 use std::ffi::{c_char, c_void, CStr};
 use std::path::PathBuf;

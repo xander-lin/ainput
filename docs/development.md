@@ -128,6 +128,25 @@ Shared settings live in `AinputConfig` in `shell/ainput.cpp`. Two rules:
 A new option also needs a field in `AinputSettings` (`shell/ainput_core.h`) and
 in `Settings` (`rust/src/settings.rs`), plus a clamp in `Settings::sanitized`.
 
+## Performance
+
+There is no benchmark harness; `rust/examples/` holds one small program per
+question, run with `cargo run --release --example <name>`. They are listed with
+their measured findings in `rust/examples/README.md`.
+
+Two rules learned from using them:
+
+- **Measure the stage, not the total.** "Recognition takes 800 ms" invites
+  guessing; "preprocess 16 ms, network 803 ms" ends the discussion.
+- **Measure the real path.** An early A/B of connection reuse used the
+  transport only (fast 401 responses) and reported a 4% gain. The same A/B on
+  real recognitions reported 44%, because a fast response hides the handshake
+  behind nothing, while slow inference overlaps it differently. Use real audio
+  and a real endpoint for anything user-visible.
+
+Add a `rust/examples/<question>.rs` rather than extending this document with
+numbers that will be stale after the next change.
+
 ## Repository conventions
 
 Tracked: `rust/`, `shell/`, `docs/`, `udev/`, `meson.build`,
