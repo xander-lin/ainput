@@ -231,4 +231,34 @@
     path-dependent bugs (see also the `ainput/config.json` stray noted during
     this rename).
 
+## 11. A real fix sat trapped in a dangling commit (found 2026-10)
+
+- **Mistake/context**: The `docs/vinput.1` switch paragraph ended a bold run
+  with `\fB)` instead of `\fP)`, so `read from the provider's config file.
+  While holding CapsLock:` rendered **bold** for months. The fix already
+  existed — it was in commit `0a12dc8`, which never reached master because it
+  was a pre-rebase/pre-amend copy of `905b5a5` and became unreachable.
+  Discovered only while auditing local branches for the fcitx5-vinput ->
+  fcitx5-ainput rename.
+- **Root cause**: Rebase/amend rewrites commit objects. The superseded object
+  keeps the *same commit title* but is no longer on any branch, so it shows up
+  only as a `dangling commit` in `git fsck`. Comparing by title makes the
+  duplicate look like "already applied", hiding the extra hunk it carried.
+  Nobody re-diffed the tree.
+- **Correction**: Applied `\fB)` -> `\fP)` to `docs/ainput.1` and verified by
+  rendering (`groff -man -Kutf8 -Tutf8`, tracking bold state per text run) that
+  the tail of the paragraph is no longer bold.
+- **Prevention**:
+  - Before deleting stale branches or consolidating history, run
+    `git fsck --lost-found --no-reflogs` and inspect every `dangling commit`.
+    Judge it by `git diff <master-counterpart> <dangling>`, **never** by commit
+    title or by `merge-base --is-ancestor` of a sibling.
+  - A dangling commit whose tree hash equals its master counterpart is a pure
+    duplicate (e.g. `0c1e5f7` vs `f6691ec`); one that differs by even 2 lines
+    may hold the only copy of a fix.
+  - Trust the rendered output over the source when editing roff: unbalanced
+    `\f` switches leak formatting silently and produce no groff warning even
+    under `-ww`.
+
+
 
