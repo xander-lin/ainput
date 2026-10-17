@@ -1,12 +1,13 @@
-# Build output
-build/
-builddir/
-compile_commands.json
-pkg/
-src/
+# Build output (repo root only — a bare "src/" would also hide the
+# tracked ASR_provider/src and adapter/src directories)
+/build/
+/builddir/
+/compile_commands.json
+/pkg/
+/src/
+/out/
+/log.txt
 *.pkg.tar.*
-out/
-log.txt
 
 # Python environments and caches
 .venv/

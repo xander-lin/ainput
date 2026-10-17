@@ -345,3 +345,31 @@
     registers (`tests/meson.build`, `tools/meson.build`).
   - Prefer a short pointer to the authoritative file over duplicating a table
     that will drift; where duplication is unavoidable, verify both copies.
+## 13. A bare `src/` in .gitignore silently hid real source directories
+  (found 2026-10)
+
+- **Mistake/context**: `.gitignore` used `src/` to exclude the directory
+  `makepkg` extracts next to the PKGBUILD. In gitignore syntax a pattern
+  without a leading slash matches at **any** depth, so the rule also covered
+  `ASR_provider/src/` and `adapter/src/`. Those directories are already
+  tracked, which masks the problem: existing files still show up in
+  `git status`, but a **new** file created there is ignored without a word.
+  `git check-ignore -v ASR_provider/src/<new>.cpp` reported
+  `.gitignore:6:src/` as the culprit.
+- **Root cause**: Ignore entries were written with the mental model "path
+  relative to repo root", but gitignore only anchors for patterns containing a
+  slash in a non-trailing position — `build/` matches `xff/build/` too.
+  `pkg/`, `out/`, and `log.txt` had the same latent problem.
+- **Correction**: Anchored every root-only entry with a leading slash
+  (`/build/`, `/builddir/`, `/pkg/`, `/src/`, `/out/`, `/log.txt`,
+  `/compile_commands.json`) and left only genuinely global patterns
+  (`*.pkg.tar.*`, `.venv/`, `config/*.json`, IDE state) unanchored.
+- **Prevention**:
+  - Anchor repo-root-only ignore entries with `/`. Assume anything unanchored
+    applies at every depth.
+  - After editing `.gitignore`, prove it: create a throwaway file in each
+    directory that must stay tracked (`git check-ignore -v
+    ASR_provider/src/probe.cpp` must exit 1), and one that must be ignored,
+    then remove both.
+  - "Already tracked so it works" is not a verification — gitignore only
+    affects untracked paths, so the failure appears on the next new file.
