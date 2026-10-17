@@ -1,11 +1,22 @@
 #include "audio_capture.h"
 
 #include <chrono>
+#include <cstdlib>
+#include <filesystem>
 #include <iostream>
 #include <thread>
 
 int main() {
     using Clock = std::chrono::steady_clock;
+
+    // AudioCapture::start() reads the global config (~/.config/ainput), which
+    // would seed the template into the real HOME. Isolate HOME like the other
+    // tests (see found.md #5 / #10) so a test run never touches user files.
+    namespace fs = std::filesystem;
+    const char *tmp = std::getenv("MESON_TEST_TMPDIR");
+    fs::path root = (tmp && *tmp) ? tmp : "/tmp/ainput-audio-capture-stop";
+    fs::create_directories(root / ".config/ainput");
+    setenv("HOME", root.c_str(), 1);
 
     ainput::AudioCapture capture;
     ainput::AudioCapture secondCapture;

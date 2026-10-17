@@ -200,3 +200,35 @@
     INFO log. `getfacl /dev/uinput` showing a `user:<you>:rw-` line is the
     one-command check.
 
+## 10. A config-seeding test leaked into the real HOME (found 2026-10)
+
+- **Mistake/context**: While renaming the project's config directory
+  (`~/.config/vinput` -> `~/.config/ainput`), a generated `config.json`
+  template kept appearing at the *new* real path during `meson test`.
+  `tests/test_audio_capture_stop.cpp` constructs `AudioCapture`, whose
+  `start()` reads the global config, so the self-healing seed wrote the
+  template into whatever `HOME` pointed at. The test never set `HOME`, so
+  that was the real user HOME.
+- **Root cause**: The same class of bug as #5, but hidden for months because
+  `~/.config/vinput` **already existed** on every dev machine — the seed only
+  fires when the file is *missing*, so an existing directory silently masked
+  the leak. Renaming the directory (a path that did not exist yet) exposed it.
+- **Correction**: `test_audio_capture_stop.cpp` now creates a temp root under
+  `MESON_TEST_TMPDIR` (fallback `/tmp/ainput-audio-capture-stop`), makes
+  `<root>/.config/ainput`, and `setenv("HOME", root, 1)` before constructing
+  `AudioCapture`, matching `test_asr_registry.cpp` / `test_config_read.cpp`.
+- **Prevention**:
+  - A green test suite does **not** prove HOME isolation. Verify by deleting
+    the real config dir (or pointing `HOME` at a fresh temp dir) and re-running
+    every test binary, then checking that the real `~/.config/ainput` and
+    `~/.cache/ainput` are still absent — not just that the tests pass.
+  - Any test that constructs a component which reads global config
+    (`AudioCapture`, providers, `OutputHandler`, `diagnosticLog`) must set
+    `HOME` first; "it does not call `readConfigFile` directly" is not enough,
+    because the read can happen inside the component's constructor/`start()`.
+  - When a rename touches a path that is normally pre-existing, treat the
+    window where it does not exist as a rare chance to catch masked
+    path-dependent bugs (see also the `ainput/config.json` stray noted during
+    this rename).
+
+
