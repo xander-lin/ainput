@@ -92,6 +92,25 @@ who want fast push-to-talk dictation without leaving the keyboard.
   package name — `aur@aur.archlinux.org:fcitx5-ainput-git.git` (HTTPS push
   is rejected with 403). aurweb's RPC index lags a git push by ~2 minutes, so
   a stale `paru -qa` right after pushing is normal, not a packaging bug.
+  The web page (`/packages/<name>`) flips over **before** the RPC index does,
+  so when RPC still says `resultcount: 0` check the page before assuming the
+  push failed.
+- Renaming a package on AUR is not possible; the procedure is: publish the new
+  `pkgbase` first, then file a **Deletion** request for the old one and link
+  the replacement (`/pkgbase/<old>` -> Package Actions -> Submit Request).
+  `Merge` is only worth it when the old package has votes/comments to carry
+  over; with none, the guidelines state a deletion request linking the
+  successor is identical. Only the maintainer can request it, and the reason
+  must live in the request itself, not in package comments — once a TU acts,
+  the request and `aur-requests` mail are the only record. Deletion leaves the
+  old git repo cloneable, so publish the successor first (2026-10 rename:
+  `fcitx5-vinput-git` -> `fcitx5-ainput-git`, PRQ#88425).
+- `replaces` is inert for how AUR packages are actually consumed: paru builds
+  a package and installs it with `pacman -U`, and `-U` ignores `replaces`
+  (verified in a throwaway pacman root). Only `conflicts` makes an install
+  offer to remove the old package. Declaring `provides`/`conflicts` against a
+  name that has no package and no dependents is dead metadata — add the pair
+  only when a stable non-`-git` package actually exists.
 - Docs live in `docs/` (`qwen-asr-api.md` etc.), accumulated engineering notes
   in `FINDINGS.md` (historical, at repo root).
 
