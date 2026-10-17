@@ -20,7 +20,7 @@ The source directory is intentionally still flat to avoid a high-risk include an
 | Audio | `src/audio_capture.h`, `src/audio_capture.cpp`, `src/buffer_detect.h`, `src/buffer_detect.cpp` | PulseAudio capture, hardware buffer detection, normalization, denoise, VAD trim, WAV writing |
 | Providers | `src/mock_provider.*`, `src/doubao_provider.*`, `src/qwen_provider.*`, `src/zipformer_provider.*`, `src/fire_red_provider.*` | Test, cloud, and local ASR implementations |
 | Qwen JSON | `src/qwen_json.h` | Dependency-free JSON helpers for Qwen config reading and schema-tolerant response parsing (covered by `tests/test_qwen_json.cpp`) |
-| Support | `src/ainput_config.h`, `src/ws_client.h`, `src/service_helper.h` | Config parsing, WebSocket client helpers, systemd/service helpers |
+| Support | `src/ainput_config.h` | Config parsing |
 | Build | `src/meson.build` | Static library, `link_whole` registration retention, external dependency ownership |
 
 ## Dependency Ownership
