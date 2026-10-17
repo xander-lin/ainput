@@ -76,11 +76,6 @@ How long CapsLock must be held before recording starts.
 \fBNotificationTimeout\fP (default \fB2000\fP)
 How long switch notifications stay visible, in milliseconds.
 .TP
-\fBBufferMs\fP (default \fB100\fP)
-PulseAudio fragment size in milliseconds (20-1000). Raise it when the end of
-a phrase is cut off on a device that delivers audio in bursts; lower it for
-quicker response. There is no auto-detection.
-.TP
 \fBDenoise\fP (default \fBnone\fP)
 none, speexdsp or deepfilter. deepfilter needs a helper binary at
 ~/.local/share/ainput/bin/deep-filter.
@@ -93,6 +88,11 @@ speexdsp suppression strength in dB.
 .TP
 \fBCrestThreshold\fP (default \fB2.4\fP)
 Speech gate; lower is more permissive, 0 disables it.
+.PP
+The microphone fragment size is fixed at 20 ms in code. It is not
+configurable: PulseAudio delivers exactly the requested amount, and audio
+still buffered but not yet a full fragment is discarded at stop, so a smaller
+fragment is always better for tail loss and the only cost is wakeup count.
 .PP
 Four further options accept credentials and model ids so a fresh install can
 be configured entirely here: \fBQwenApiKey\fP, \fBQwenModel\fP,

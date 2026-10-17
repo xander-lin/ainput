@@ -454,11 +454,10 @@
   which it did; nothing asserted that the *capture path consumes the value*.
   A green test suite therefore described a code path production never took,
   and the docs described a cache file that was never created.
-- **Correction**: Removed auto-detection entirely and made the fragment size an
-  explicit setting (`BufferMs`, default 100 ms = the old hard-coded 3200
-  bytes), passed shell → Rust settings → `pa_buffer_attr.fragsize`, logged as
-  `audio/capture_buffer` with both the requested ms and the computed bytes.
-  The value is clamped to 20–1000 ms.
+- **Correction**: First replaced the detection with a `BufferMs` setting, then
+  measured the actual delivery behaviour and removed that too — see #18. The
+  fragment size is now a code constant (20 ms), logged as
+  `audio/capture_buffer` with the computed byte count.
 - **Prevention**:
   - A test proves a component works; it does not prove production uses the
     component. For every feature, grep for callers **outside** `tests/` and
@@ -470,3 +469,49 @@
     log, socket), that artefact must be reproduced on a clean machine during
     review. "It is written by `detectHardwareBurstBytes`" was true and
     irrelevant.
+
+## 18. The mic buffer is not a tunable, and not detectable either (found 2026-10)
+
+- **Mistake/context**: After #17 the fragment size became a user setting
+  (`BufferMs`) with advice to "raise it if the end of a phrase is cut off,
+  lower it for quicker response". A user pushed back: a buffer should be
+  detected, not hand-tuned, and only one value can be optimal. Measuring the
+  real device settled both questions.
+- **Measurement**: a probe requested 5/10/20/50/100/200/400 ms fragsize, read
+  for 3 s, and reported granted size, per-read chunk sizes, and total captured
+  with and without a post-stop drain:
+
+  | requested | granted | chunk size | captured (no drain) | captured (120 ms drain) |
+  |-----------|---------|------------|---------------------|-------------------------|
+  | 20 ms | 640 B | 640 B | 2980 ms | 3100 ms |
+  | 50 ms | 1600 B | 1600 B | 2950 ms | 3100 ms |
+  | 100 ms | 3200 B | 3200 B | 2900 ms | 3100 ms |
+  | 200 ms | 6400 B | 6400 B | 2800 ms | 3000 ms |
+  | 400 ms | 12800 B | 12800 B | 2800 ms | 2800 ms |
+
+- **Root cause**: PulseAudio echoes the requested fragsize back as the delivery
+  size. There is no device-specific "burst period" to discover through the
+  stream API, so the auto-detection in #17 was measuring its own request. What
+  *is* deterministic is different: audio buffered but not yet forming a full
+  fragment is discarded when the stream closes, so the tail loss is bounded by
+  the fragment size. Smaller is strictly better; the only cost is wakeups,
+  which is negligible because the capture loop already polls at 2 ms.
+  The historical "64K ok, 4K loses the tail" split came from
+  `pa_simple_read`, which blocks until the full byte count arrives — an I/O
+  pattern the current peek/discard loop does not have.
+- **Correction**: Fragment size is a constant (`capture::BUFFER_MS = 20`), the
+  post-stop drain is 150 ms (must exceed one fragment, asserted by a test), and
+  the GUI option was removed. `audio/capture_buffer` logs the value actually
+  applied.
+- **Prevention**:
+  - Before exposing a knob, measure whether the underlying quantity is
+    controllable at all. "It felt tunable" is not evidence; here the parameter
+    turned out to be an echo of our own request.
+  - Distinguish "quantisation loss bounded by X" from "optimum at X". The
+    former means pick the smallest X that is safe; only the latter justifies a
+    per-device setting.
+  - When a past fix is attributed to a device ("this USB mic needs 64K"), check
+    whether the blocking I/O primitive was actually the cause before building a
+    device model around it.
+  - A drain/flush window must be derived from, and tested against, the buffer
+    size it drains, or the last fragment silently disappears.

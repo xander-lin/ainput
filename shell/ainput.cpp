@@ -111,16 +111,6 @@ FCITX_CONFIGURATION(
         this, "NotificationTimeout",
         "How long the Ctrl+CapsLock switch notification stays on screen (ms)",
         2000, fcitx::IntConstrain(200, 20000)};
-    // PulseAudio hands us audio in fragments of this size. Larger fragments
-    // buffer more audio (safer against clipping the last syllable on devices
-    // with bursty delivery) but add latency before processing starts.
-    // There is no auto-detection: it is a plain setting so a device that
-    // clips or stutters can be fixed by hand.
-    fcitx::Option<int, fcitx::IntConstrain> bufferMs{
-        this, "BufferMs",
-        "Microphone buffer in ms. Raise if the end of a phrase is cut off, "
-        "lower for quicker response",
-        100, fcitx::IntConstrain(20, 1000)};
     fcitx::Option<AinputDenoise> denoise{
         this, "Denoise", "Noise reduction method", AinputDenoise::none};
     fcitx::Option<double, fcitx::NoConstrain<double>, fcitx::DoubleMarshaller> lufsTarget{
@@ -312,7 +302,6 @@ private:
         settings.provider = provider.c_str();
         settings.activation_msec = config_.activationMsec.value();
         settings.notification_timeout = config_.notificationTimeout.value();
-        settings.buffer_ms = config_.bufferMs.value();
         settings.denoise = denoiseToInt(config_.denoise.value());
         settings.lufs_target = config_.lufsTarget.value();
         settings.speex_level = config_.speexLevel.value();

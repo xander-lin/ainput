@@ -29,12 +29,27 @@ use crate::wav;
 
 /// Bytes of 16 kHz mono S16 audio per millisecond.
 const BYTES_PER_MS: u32 = 32;
+
+/// Fragment size requested from PulseAudio.
+///
+/// Measured behaviour: the server delivers exactly this many bytes per wakeup,
+/// and discards any partial fragment still buffered when the stream closes.
+/// The tail loss is therefore bounded by this value, which makes smaller
+/// strictly better; the only cost is more wakeups (50/s here), and the capture
+/// loop already polls at 2 ms so that cost is not real. 20 ms keeps the loss
+/// imperceptible while staying well above the ~5 ms floor where PulseAudio
+/// starts rounding the request.
+///
+/// This is deliberately not a user setting: there is no per-device optimum to
+/// find, because the value is simply echoed back as the delivery size.
+pub const BUFFER_MS: u32 = 20;
 /// How long to wait for the stream to reach READY before giving up.
 const READY_TIMEOUT: Duration = Duration::from_secs(3);
 /// Poll interval while recording; bounds stop latency.
 const POLL_INTERVAL: Duration = Duration::from_millis(2);
-/// Extra time spent draining already-buffered fragments after a stop.
-const TAIL_DRAIN: Duration = Duration::from_millis(120);
+/// Time spent draining already-buffered audio after a stop. Must exceed
+/// `BUFFER_MS`, otherwise the last fragment is never completed and is lost.
+pub const TAIL_DRAIN: Duration = Duration::from_millis(150);
 
 pub struct Captured {
     pub samples: Vec<i16>,
@@ -213,10 +228,7 @@ fn run_capture<F>(
         }
     };
 
-    // The fragment size is the user's BufferMs setting, not a guess: on a
-    // device that delivers audio in bursts, a larger fragment is what keeps
-    // the end of a phrase from being cut off.
-    let fragsize = (settings.buffer_ms.max(1) as u32) * BYTES_PER_MS;
+    let fragsize = BUFFER_MS * BYTES_PER_MS;
     let attr = pulse::def::BufferAttr {
         maxlength: u32::MAX,
         tlength: u32::MAX,
@@ -229,7 +241,7 @@ fn run_capture<F>(
         "capture_buffer",
         &[
             ("recognition_id", recognition_id.to_string()),
-            ("buffer_ms", settings.buffer_ms.to_string()),
+            ("buffer_ms", BUFFER_MS.to_string()),
             ("fragsize_bytes", fragsize.to_string()),
         ],
     );

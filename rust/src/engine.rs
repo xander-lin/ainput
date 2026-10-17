@@ -114,7 +114,6 @@ impl Engine {
                 ("provider", settings.provider.clone()),
                 ("denoise", settings.denoise.as_str().to_string()),
                 ("crest_threshold", format!("{:.2}", settings.crest_threshold)),
-                ("buffer_ms", settings.buffer_ms.to_string()),
             ],
         );
         crate::settings::set_active_credentials(settings.credentials.clone());
@@ -407,12 +406,10 @@ mod tests {
         let mut settings = Settings::default();
         settings.activation_msec = 1;
         settings.crest_threshold = -5.0;
-        settings.buffer_ms = 5;
         engine.set_settings(settings);
         let snapshot = engine.settings_snapshot();
         assert!(snapshot.activation_msec >= 50);
         assert!(snapshot.crest_threshold >= 0.0);
-        assert!(snapshot.buffer_ms >= 20);
         engine.shutdown();
     }
 
@@ -475,13 +472,6 @@ mod tests {
         settings.provider = "mock".to_string();
         // Make the gate permissive so a quiet room still reaches the provider.
         settings.crest_threshold = 0.0;
-        // Lets a manual run exercise a non-default fragment size:
-        //   AINPUT_BUFFER_MS=250 cargo test --features diagnostics -- --ignored
-        if let Ok(value) = std::env::var("AINPUT_BUFFER_MS") {
-            if let Ok(ms) = value.parse::<i32>() {
-                settings.buffer_ms = ms;
-            }
-        }
         settings.denoise = crate::settings::Denoise::None;
         set_current_provider("mock");
         engine.set_settings(settings);

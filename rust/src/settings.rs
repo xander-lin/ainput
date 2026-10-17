@@ -89,9 +89,6 @@ pub struct Settings {
     pub provider: String,
     pub activation_msec: i32,
     pub notification_timeout: i32,
-    /// PulseAudio fragment size. Bigger buffers more audio before processing
-    /// starts, which protects the last syllable on bursty devices.
-    pub buffer_ms: i32,
     pub denoise: Denoise,
     pub lufs_target: f64,
     pub speex_level: i32,
@@ -105,7 +102,6 @@ impl Default for Settings {
             provider: "qwen".to_string(),
             activation_msec: 300,
             notification_timeout: 2000,
-            buffer_ms: 100,
             denoise: Denoise::None,
             lufs_target: -16.0,
             speex_level: -15,
@@ -121,7 +117,6 @@ impl Settings {
     pub fn sanitized(mut self) -> Self {
         self.activation_msec = self.activation_msec.clamp(50, 5000);
         self.notification_timeout = self.notification_timeout.clamp(200, 20000);
-        self.buffer_ms = self.buffer_ms.clamp(20, 1000);
         if !(self.lufs_target > -100.0 && self.lufs_target < 0.0) {
             self.lufs_target = -16.0;
         }
@@ -172,16 +167,14 @@ mod tests {
     }
 
     #[test]
-    fn buffer_ms_is_clamped_and_converted() {
-        let mut settings = Settings::default();
-        assert_eq!(settings.buffer_ms, 100);
-        settings.buffer_ms = 1;
-        assert_eq!(settings.clone().sanitized().buffer_ms, 20);
-        settings.buffer_ms = 5000;
-        assert_eq!(settings.sanitized().buffer_ms, 1000);
-
-        // Bytes per millisecond at 16 kHz mono S16: 16000 * 2 / 1000 = 32.
-        assert_eq!(100u32 * 32, 3200, "default stays 100 ms = 3200 bytes");
+    fn capture_constants_are_consistent() {
+        use crate::capture::{BUFFER_MS, TAIL_DRAIN};
+        // Buffered-but-incomplete audio is discarded at stop, so the loss is
+        // bounded by one fragment. The drain must therefore outlast it.
+        assert_eq!(BUFFER_MS, 20);
+        assert!(TAIL_DRAIN.as_millis() as u32 > BUFFER_MS);
+        // 16 kHz mono S16 = 32 bytes per millisecond.
+        assert_eq!(BUFFER_MS * 32, 640, "20 ms = 640 bytes");
     }
 
     #[test]
