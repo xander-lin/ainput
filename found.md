@@ -503,7 +503,27 @@
   post-stop drain is 150 ms (must exceed one fragment, asserted by a test), and
   the GUI option was removed. `audio/capture_buffer` logs the value actually
   applied.
+- **Deeper finding (same day)**: the old detector's "hardware burst period" was
+  an artefact. Reproducing its exact algorithm (`buffer_detect.cpp:171-290`) on
+  this machine's timings yields **64000 bytes = 2.0 s** — the identical number
+  recorded for the CX31993 in `b09e19f`. The cause: the first
+  `pa_simple_read(200)` after opening a stream blocks ~2014 ms (device wake-up),
+  every later read returns instantly. Over 6 s there is exactly **one** 2 s gap,
+  not three, so it is a one-time startup delay — but the detector sorts all
+  timings and takes the largest gap, which is always that startup delay, on any
+  machine. Hence a device-independent constant masquerading as a device
+  property, and a 2 s buffer recommended for every device.
+  Two bugs compounded: blocking `pa_simple_read` made the buffer size
+  semantically important, and the measurement attributed a startup cost to
+  hardware periodicity. A 2 s blocking read also *masked* the tail loss
+  (the read finishes roughly when audio starts flowing), which is why the
+  change looked like a fix.
 - **Prevention**:
+  - A one-off startup cost must never enter a "periodic behaviour" measurement.
+    Check whether a detected pattern repeats within the observation window
+    before calling it periodic (here: 1 occurrence in 6 s ≠ a 2 s period).
+  - When a heuristic reproduces the same constant on unrelated hardware, the
+    constant describes the measuring code, not the hardware.
   - Before exposing a knob, measure whether the underlying quantity is
     controllable at all. "It felt tunable" is not evidence; here the parameter
     turned out to be an echo of our own request.
