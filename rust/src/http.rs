@@ -4,7 +4,6 @@
 //! cancellation semantics match the previous C++ implementation while the
 //! error handling is Rust's.
 
-use std::cell::Cell;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
@@ -227,38 +226,30 @@ impl Transport {
         if cancel.load(Ordering::Acquire) {
             return Err(TransportError::Cancelled);
         }
-        let generation = self.network.generation();
-        let mut agent = {
+        let (generation, agent) = {
             let mut idle = self.idle.lock().unwrap();
+            let generation = self.network.generation();
             idle.retain(|(epoch, _)| *epoch == generation);
-            idle.pop().map(|(_, agent)| agent)
-        }
-        .unwrap_or_default();
+            (generation, idle.pop().map(|(_, agent)| agent))
+        };
+        let mut agent = agent.unwrap_or_default();
         if id != 0 {
             crate::diagnostic::trace(id, stage);
         }
-        let changed = Cell::new(false);
-        let result = agent.post_json_while(
+        // Route messages also describe unrelated interface changes and route
+        // renewals. Keep a working transfer alive; only its reuse is unsafe.
+        let result = agent.post_json(
             url,
             headers,
             body,
             timeout.max(Duration::from_millis(1)),
-            || {
-                if cancel.load(Ordering::Acquire) {
-                    return false;
-                }
-                let moved = self.network.generation() != generation;
-                if moved {
-                    changed.set(true);
-                }
-                !moved
-            },
+            cancel,
         );
         let same_network = self.network.generation() == generation;
         if cancel.load(Ordering::Acquire) {
             return Err(TransportError::Cancelled);
         }
-        if changed.get() || (result.is_err() && !same_network) {
+        if result.is_err() && !same_network {
             return Err(TransportError::NetworkChanged);
         }
         if result.is_ok() && same_network {
@@ -346,7 +337,13 @@ pub(crate) mod tests {
             fresh
                 .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nnew")
                 .unwrap();
-            let _ = hold.recv_timeout(Duration::from_secs(4));
+            hold.recv_timeout(Duration::from_secs(4)).unwrap();
+            old.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\n\r\nkept")
+                .unwrap();
+            read_request(&mut fresh); // The obsolete connection must stay out of the pool.
+            fresh
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nstill")
+                .unwrap();
         });
         let post = |transport: &Transport, url: &str| {
             transport.post_json(
@@ -368,11 +365,9 @@ pub(crate) mod tests {
         stalled.recv_timeout(Duration::from_secs(3)).unwrap();
         network.0.fetch_add(1, Ordering::SeqCst);
         assert_eq!(post(&transport, &url).unwrap().body, "new");
-        assert!(matches!(
-            old.join().unwrap(),
-            Err(TransportError::NetworkChanged)
-        ));
         release.send(()).unwrap();
+        assert_eq!(old.join().unwrap().unwrap().body, "kept");
+        assert_eq!(post(&transport, &url).unwrap().body, "still");
         server.join().unwrap();
     }
 

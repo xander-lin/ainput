@@ -127,8 +127,9 @@ Cloud requests are cancelled through libcurl's progress callback; local engines
 by killing the child. Successful HTTP transfers can return their handle to the
 pool. Handles are used exclusively during transfers and discarded on transport
 errors. Linux link, interface address, and route notifications invalidate the
-old network's cached connections and DNS. A confirmed Doubao task can resume
-querying with its original ID; audio uploads are not automatically replayed.
+old network's cached connections and DNS for new requests. Existing transfers
+can still finish. A confirmed Doubao task can resume querying with its original
+ID after a failed status request; audio uploads are not automatically replayed.
 
 ### Adding a backend
 
@@ -150,7 +151,7 @@ reported to the user. There is no third option.
 | Missing API key / model file | panel shows the exact file to edit |
 | Denoise helper missing | recording is **discarded** with a setup error, not sent undenoised |
 | Microphone unavailable | `Ainput: microphone ...` immediately, not an empty result |
-| Input context gone before commit | result goes to the currently focused context, logged |
+| Input context gone before commit | result is discarded and the recording ID is logged |
 | `/dev/uinput` unavailable | one warning naming the udev rule; voice input still works |
 | Queue full | `recognition queue full; try again`, newest recording discarded |
 | Dictation deadline expires | reports a timeout and advances delivery order |

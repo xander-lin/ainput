@@ -9,9 +9,8 @@
 //! code.
 
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
-use std::sync::atomic::Ordering;
-use std::time::{Duration, Instant};
+use std::process::Command;
+use std::time::Duration;
 
 use serde_json::Value;
 
@@ -195,35 +194,6 @@ fn last_line(output: &str) -> String {
         .collect()
 }
 
-fn run_child(
-    child: &mut Child,
-    deadline: Instant,
-    cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>,
-) -> Result<()> {
-    loop {
-        if cancel.load(Ordering::Relaxed) {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(Error::timeout("cancelled"));
-        }
-        match child.try_wait() {
-            Ok(Some(_)) => return Ok(()),
-            Ok(None) => {}
-            Err(err) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(Error::local_setup(format!("cannot wait for engine: {err}")));
-            }
-        }
-        if Instant::now() >= deadline {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(Error::timeout("local engine timed out"));
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    }
-}
-
 impl Provider for Sherpa {
     fn transcribe(&self, input: &Input<'_>) -> Result<String> {
         self.transcribe_with(input, super::Context::default())
@@ -252,38 +222,17 @@ impl Provider for Sherpa {
         }
 
         let deadline = context.deadline(Duration::from_secs(settings.timeout_secs));
-        if input.cancel.load(Ordering::Acquire) || Instant::now() >= deadline {
-            return Err(Error::timeout("cancelled or expired before starting local engine"));
-        }
-        let args = self.arguments(&settings, input.wav_path);
-        let mut child = Command::new(&settings.bin_path)
-            .args(&args)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|err| {
-                Error::local_setup(format!(
-                    "{label}: cannot run {}: {err}",
-                    settings.bin_path.display()
-                ))
-            })?;
+        let mut command = Command::new(&settings.bin_path);
+        command.args(self.arguments(&settings, input.wav_path));
+        let output = crate::process::output_file(&mut command)
+            .map_err(|err| Error::runtime(format!("{label}: cannot open output: {err}")))?;
+        let status = crate::process::run(&mut command, label, Some(deadline), input.cancel)?;
+        let combined = crate::process::read_output(output)
+            .map_err(|err| Error::runtime(format!("{label}: cannot read output: {err}")))?;
 
-        run_child(
-            &mut child,
-            deadline,
-            input.cancel,
-        )?;
-
-        let output = child
-            .wait_with_output()
-            .map_err(|err| Error::runtime(format!("{label}: cannot collect output: {err}")))?;
-        let mut combined = String::from_utf8_lossy(&output.stdout).into_owned();
-        combined.push_str(&String::from_utf8_lossy(&output.stderr));
-
-        if !output.status.success() {
+        if !status.success() {
             return Err(Error::runtime(format!(
-                "{label}: engine exited with {}: {}",
-                output.status,
+                "{label}: engine exited with {status}: {}",
                 last_line(&combined)
             )));
         }
@@ -336,6 +285,8 @@ mod tests {
 
         let fire_red = Sherpa::fire_red();
         let args = fire_red.arguments(&settings, &PathBuf::from("/tmp/a.wav"));
-        assert!(args.iter().any(|a| a.starts_with("--fire-red-asr-encoder=")));
+        assert!(args
+            .iter()
+            .any(|a| a.starts_with("--fire-red-asr-encoder=")));
     }
 }

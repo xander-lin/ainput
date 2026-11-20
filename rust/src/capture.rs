@@ -259,12 +259,13 @@ pub fn run(
         return Err(Error::audio_data("no audio captured"));
     }
 
-    let gated = dsp::preprocess(
+    let gated = dsp::preprocess_cancellable(
         &mut samples,
         settings.denoise,
         settings.lufs_target,
         settings.speex_level,
         settings.crest_threshold,
+        cancel,
     )?;
 
     if !gated.voice {

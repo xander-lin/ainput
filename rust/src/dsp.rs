@@ -5,8 +5,11 @@
 //! trim. The denoiser needs the leading noise to build a profile, which is why
 //! trimming happens last.
 
+use std::os::unix::fs::DirBuilderExt;
 use std::path::PathBuf;
 use std::ptr;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 
 use crate::error::{Error, Result};
 use crate::ffi::dsp;
@@ -34,7 +37,9 @@ pub fn normalize(samples: &mut [i16], target_lufs: f64) -> f64 {
     if loudness < -70.0 || !loudness.is_finite() {
         return loudness;
     }
-    let gain = 10f64.powf((target_lufs - loudness) / 20.0).clamp(0.05, 20.0);
+    let gain = 10f64
+        .powf((target_lufs - loudness) / 20.0)
+        .clamp(0.05, 20.0);
     for sample in samples.iter_mut() {
         let scaled = (*sample as f64 * gain).clamp(-32768.0, 32767.0);
         *sample = scaled as i16;
@@ -119,8 +124,7 @@ pub fn has_voice(samples: &[i16], crest_threshold: f64) -> bool {
     if total == 0 {
         return voice_frames >= MIN_VOICE_FRAMES;
     }
-    voice_frames >= MIN_VOICE_FRAMES
-        && (voice_frames as f64 / total as f64) >= MIN_VOICE_RATIO
+    voice_frames >= MIN_VOICE_FRAMES && (voice_frames as f64 / total as f64) >= MIN_VOICE_RATIO
 }
 
 /// Removes leading and trailing non-speech frames, keeping one frame of pad
@@ -219,10 +223,7 @@ pub fn denoise_speexdsp(samples: &mut [i16], level_db: i32) {
     let frame_count = samples.len() / FRAME_SIZE;
     for index in 0..frame_count {
         unsafe {
-            dsp::speex_preprocess_run(
-                state,
-                samples[index * FRAME_SIZE..].as_mut_ptr(),
-            );
+            dsp::speex_preprocess_run(state, samples[index * FRAME_SIZE..].as_mut_ptr());
         }
     }
     let remainder = samples.len() % FRAME_SIZE;
@@ -338,7 +339,10 @@ fn deep_filter_binary() -> PathBuf {
 /// an enabled denoiser that does nothing is exactly the class of silent
 /// failure this rewrite is meant to remove.
 pub fn denoise_deepfilter(samples: &mut Vec<i16>) -> Result<()> {
-    let binary = deep_filter_binary();
+    run_deepfilter(samples, deep_filter_binary(), &AtomicBool::new(false))
+}
+
+fn run_deepfilter(samples: &mut Vec<i16>, binary: PathBuf, cancel: &AtomicBool) -> Result<()> {
     if !binary.is_file() {
         return Err(Error::local_setup(format!(
             "deepfilter is enabled but {} does not exist",
@@ -346,63 +350,51 @@ pub fn denoise_deepfilter(samples: &mut Vec<i16>) -> Result<()> {
         )));
     }
 
-    let work_dir = std::env::temp_dir();
-    let stamp = format!("{}_{}", std::process::id(), crate::diagnostic::hash_value(
-        &format!("{:?}", std::time::SystemTime::now()),
+    static NEXT_WORK: AtomicU64 = AtomicU64::new(0);
+    let work_dir = std::env::temp_dir().join(format!(
+        "ainput-df-{}-{}-{}",
+        std::process::id(),
+        NEXT_WORK.fetch_add(1, Ordering::Relaxed),
+        crate::diagnostic::hash_value(&format!("{:?}", std::time::SystemTime::now()))
     ));
-    let input_48k = work_dir.join(format!("ainput_df_{stamp}_48k.wav"));
-    let output_48k = work_dir.join(format!("ainput_df_{stamp}_48k_df.wav"));
+    std::fs::DirBuilder::new()
+        .mode(0o700)
+        .create(&work_dir)
+        .map_err(|error| Error::audio_data(format!("cannot stage DeepFilter audio: {error}")))?;
+    struct WorkDir(PathBuf);
+    impl Drop for WorkDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+    let work_dir = WorkDir(work_dir);
+    let input_48k = work_dir.0.join("input_48k.wav");
+    let output_48k = work_dir.0.join("input_48k_df.wav");
 
     let resampled = resample(samples, 16_000, 48_000)?;
     crate::wav::write(&input_48k, &resampled)?;
 
-    let status = std::process::Command::new(&binary)
-        .arg("-D")
-        .arg("-o")
-        .arg(&work_dir)
-        .arg(&input_48k)
-        .status();
-
-    let cleanup = |path: &PathBuf| {
-        let _ = std::fs::remove_file(path);
-    };
-    cleanup(&input_48k);
-
-    let status = match status {
-        Ok(status) => status,
-        Err(err) => {
-            cleanup(&output_48k);
-            return Err(Error::local_setup(format!(
-                "cannot run {}: {err}",
-                binary.display()
-            )));
-        }
-    };
+    let mut command = std::process::Command::new(&binary);
+    command.arg("-D").arg("-o").arg(&work_dir.0).arg(&input_48k);
+    let status = crate::process::run(
+        &mut command,
+        &binary.display().to_string(),
+        Some(Instant::now() + Duration::from_secs(120)),
+        cancel,
+    )?;
     if !status.success() {
-        cleanup(&output_48k);
         return Err(Error::local_setup(format!(
             "{} exited with {status}",
             binary.display()
         )));
     }
 
-    // DeepFilterNet writes `<stem>_48k_df.wav` next to its output directory.
-    let produced = if output_48k.is_file() {
-        output_48k.clone()
-    } else {
-        // Some builds keep the input name and write `<stem>_df.wav`.
-        let alternative = work_dir.join(format!("ainput_df_{stamp}_48k_df.wav"));
-        alternative
-    };
-    let result = crate::wav::read(&produced).and_then(|filtered| {
+    let filtered = crate::wav::read(&output_48k).and_then(|filtered| {
         if filtered.is_empty() {
             return Err(Error::audio_data("deepfilter produced an empty WAV"));
         }
         resample(&filtered, 48_000, 16_000)
-    });
-    cleanup(&produced);
-
-    let filtered = result?;
+    })?;
     *samples = filtered;
     Ok(())
 }
@@ -416,13 +408,31 @@ pub fn preprocess(
     speex_level: i32,
     crest_threshold: f64,
 ) -> Result<Gated> {
+    preprocess_cancellable(
+        samples,
+        denoise,
+        lufs_target,
+        speex_level,
+        crest_threshold,
+        &AtomicBool::new(false),
+    )
+}
+
+pub(crate) fn preprocess_cancellable(
+    samples: &mut Vec<i16>,
+    denoise: Denoise,
+    lufs_target: f64,
+    speex_level: i32,
+    crest_threshold: f64,
+    cancel: &AtomicBool,
+) -> Result<Gated> {
     let loudness = normalize(samples, lufs_target);
     let voice = has_voice(samples, crest_threshold);
     if voice {
         match denoise {
             Denoise::None => {}
             Denoise::Speexdsp => denoise_speexdsp(samples, speex_level),
-            Denoise::DeepFilter => denoise_deepfilter(samples)?,
+            Denoise::DeepFilter => run_deepfilter(samples, deep_filter_binary(), cancel)?,
         }
         trim_silence(samples);
     }

@@ -18,6 +18,9 @@ use crate::templates;
 
 const SUBMIT_URL: &str = "https://openspeech.bytedance.com/api/v3/auc/bigmodel/submit";
 const QUERY_URL: &str = "https://openspeech.bytedance.com/api/v3/auc/bigmodel/query";
+// A status query is safe to retry. Do not spend the entire dictation budget
+// waiting for one stale socket to produce a response.
+const QUERY_TIMEOUT: Duration = Duration::from_secs(5);
 
 const STATUS_SUCCESS: &str = "20000000";
 const STATUS_IN_QUEUE: &str = "20000002";
@@ -301,7 +304,7 @@ fn recognize(
                 ("X-Api-Request-Id", task_id.as_str()),
             ],
             "{}",
-            remaining(deadline)?,
+            remaining(deadline)?.min(QUERY_TIMEOUT),
             input.cancel,
         );
         let query = match query {
@@ -316,7 +319,7 @@ fn recognize(
                 }
                 continue;
             }
-            Err(TransportError::Network(_)) if !retried_query => {
+            Err(TransportError::Network(_) | TransportError::Timeout(_)) if !retried_query => {
                 // The route may already have changed before this query
                 // began. Retry once on a fresh handle once it settles.
                 retried_query = true;
@@ -433,6 +436,7 @@ mod tests {
             assert!(query.starts_with("POST /query "));
             assert_eq!(task_id(&query), task_id(&submit));
             network.0.fetch_add(1, Ordering::SeqCst);
+            drop(old);
 
             let (mut fresh, _) = listener.accept().unwrap();
             let retry = read_request(&mut fresh);

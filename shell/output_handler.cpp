@@ -27,11 +27,9 @@ const char *stageText(Stage stage) {
 } // namespace
 
 OutputHandler::OutputHandler(fcitx::Instance *instance) : instance_(instance) {
-    if (pipe(wakePipe_) != 0) {
+    if (pipe2(wakePipe_, O_NONBLOCK | O_CLOEXEC) != 0) {
         throw std::runtime_error("Ainput: OutputHandler pipe() failed");
     }
-    fcntl(wakePipe_[0], F_SETFL, O_NONBLOCK);
-    fcntl(wakePipe_[1], F_SETFL, O_NONBLOCK);
 
     wakeWatcher_ = instance_->eventLoop().addIOEvent(
         wakePipe_[0], fcitx::IOEventFlag::In,
@@ -58,9 +56,6 @@ void OutputHandler::rememberTarget(uint64_t recognitionId) {
     fcitx::ICUUID uuid = {};
     if (auto *ic = instance_->mostRecentInputContext()) {
         uuid = ic->uuid();
-    } else {
-        FCITX_INFO() << "Ainput: starting with no input context; the result "
-                        "will go to whatever is focused when it arrives";
     }
     targets_.remember(recognitionId, uuid);
 }
@@ -162,9 +157,8 @@ void OutputHandler::commitPending(const Results::Entry &entry) {
         return;
     }
     auto *ic = instance_->inputContextManager().findByUUID(entry.context);
-    if (!ic) ic = instance_->mostRecentInputContext();
     if (!ic) {
-        FCITX_INFO() << "Ainput: id=" << entry.id << " stage=commit_no_context";
+        FCITX_INFO() << "Ainput: id=" << entry.id << " stage=original_context_gone";
         return;
     }
 

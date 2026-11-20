@@ -745,3 +745,29 @@
   both synthetic events.
 - **Prevention**: Exercise a second recording after cancellation in a session
   without a uinput device, using the fcitx5 frontend and real key handling.
+
+## 26. Cancellation stopped delivery but missed external audio helpers
+
+- **Mistake/context**: DeepFilter used a blocking child wait, and the local
+  recognizer waited for exit before reading its output pipes. A wedged helper
+  could keep a thread occupied after Escape or delay addon shutdown.
+- **Root cause**: The dictation cancel flag did not reach every subprocess wait;
+  local recognizer output could also fill the pipes before exit.
+- **Correction**: The shared runner cancels and reaps the local process group.
+  Sherpa logs go to an anonymous regular file, so reading the result cannot
+  deadlock on output pipes. DeepFilter audio staging is private and job-scoped.
+- **Prevention**: Test cancellation after the helper starts, and verify that
+  a helper can exit after emitting more than a pipe buffer of output.
+
+## 27. A route notification does not prove a transfer lost connectivity
+
+- **Mistake/context**: The first route-aware implementation cancelled any
+  active HTTP request on any subscribed netlink notification, including route
+  renewals and changes to an unrelated interface.
+- **Root cause**: Cache invalidation needs only a hint, but the same hint is
+  insufficient proof that an existing upload failed.
+- **Correction**: Keep healthy in-flight requests alive. Use new handles for
+  new requests and retry short, safe status queries after real failures.
+- **Prevention**: In the connection recovery test, keep the old upload working
+  while the new request opens a new connection, and ensure the old connection
+  is not returned to the current pool.

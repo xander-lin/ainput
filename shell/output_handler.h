@@ -29,9 +29,8 @@ enum class Stage {
 /// contexts themselves: mostRecentInputContext() and the context manager are
 /// not thread-safe.
 ///
-/// A result whose original input context is gone falls back to the currently
-/// focused context, and is logged rather than dropped silently: the user just
-/// finished speaking and expects the text to appear somewhere they can see.
+/// A result is delivered only to the original input context. If that context
+/// is gone, the drop is logged without recording the text.
 class OutputHandler {
 public:
     explicit OutputHandler(fcitx::Instance *instance);

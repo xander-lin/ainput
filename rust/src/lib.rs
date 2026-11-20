@@ -27,6 +27,7 @@ mod error;
 mod ffi;
 pub mod http;
 mod network;
+mod process;
 pub mod settings;
 mod templates;
 mod uinput;
