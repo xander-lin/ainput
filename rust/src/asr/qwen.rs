@@ -11,7 +11,7 @@ use serde_json::{json, Value};
 use super::{Input, Provider};
 use crate::config;
 use crate::error::{Error, Result};
-use crate::http::{self, TransportError};
+use crate::http::TransportError;
 use crate::settings::Credentials;
 use crate::templates;
 
@@ -275,6 +275,10 @@ fn classify(status: u64, code: &str, message: &str) -> crate::error::Category {
 
 impl Provider for Qwen {
     fn transcribe(&self, input: &Input<'_>) -> Result<String> {
+        self.transcribe_with(input, super::Context::default())
+    }
+
+    fn transcribe_with(&self, input: &Input<'_>, context: super::Context<'_>) -> Result<String> {
         let settings = Settings::load(input.credentials)?;
         if input.cancel.load(Ordering::Relaxed) {
             return Err(Error::timeout("cancelled"));
@@ -294,15 +298,17 @@ impl Provider for Qwen {
 
         let authorization = format!("Bearer {}", settings.api_key);
         let network_started = std::time::Instant::now();
-        let response = http::post_json(
+        let response = context.client.post_json(
+            context.id, "qwen_request",
             &settings.endpoint,
             &[("Authorization", authorization.as_str()), ("Accept", "application/json")],
             &body,
-            std::time::Duration::from_secs(settings.timeout_secs.max(1) as u64),
+            context.remaining(std::time::Duration::from_secs(settings.timeout_secs.max(1) as u64))?,
             input.cancel,
         )
         .map_err(|err| match err {
             TransportError::Cancelled => Error::timeout("cancelled"),
+            TransportError::NetworkChanged => Error::network("network changed during Qwen recognition"),
             TransportError::Timeout(message) => {
                 Error::timeout(format!("Qwen request timed out: {message}"))
             }

@@ -16,10 +16,10 @@ and C libraries.
                            │ extern "C" — integers, C strings, POD only
 ┌──────────────────────────┴───────────────────────────────────┐
 │ rust/  (Rust, ~3400 lines)                                    │
-│   capture        PulseAudio, per-recording thread             │
+│   capture        PulseAudio, runs on the dictation thread     │
 │   dsp            ebur128, speexdsp, soxr, WAV                 │
 │   asr            qwen, doubao, zipformer, fire_red, mock      │
-│   engine         queue + single recognition worker            │
+│   engine         per-dictation threads, deadlines, cancellation │
 │   config         provider JSON, schema, templates, migration   │
 │   uinput         virtual keyboard for CapsLock restore         │
 │   diagnostic     bounded JSON-lines log                       │
@@ -54,10 +54,9 @@ CapsLock press
 CapsLock release
   -> panel shows "processing audio...", engine.stop() signals the thread,
      CapsLock restored through uinput
-  -> capture thread finishes preprocessing and enqueues the WAV
-  -> one recognition worker picks it up in FIFO order
+  -> dictation thread finishes preprocessing and starts recognition
   -> provider runs (cloud: HTTP; local: one child process)
-  -> on_text / on_error → OutputHandler → commitString in the fcitx loop
+  -> on_text / on_error → OutputHandler → in-order delivery per input context
 ```
 
 `Ctrl+CapsLock` enters switch mode without recording. `←/→` or `h/l` change the
@@ -69,18 +68,19 @@ backend, `↑/↓` or `k/j` change the denoiser. Both are written to
 | Thread | Count | Work |
 |--------|-------|------|
 | fcitx5 main | 1 | key events, config, `commitString` |
-| capture | one per recording | PulseAudio read loop, DSP, WAV write |
-| recognition | one for the process | pulls from the queue, calls the provider |
+| dictation | one per recording | PulseAudio, DSP, WAV write, provider call |
 
-At most three recordings are in flight, counting the one being recognized. The
-counter is reserved **before** anything is created and released exactly once on
-every path — success, provider error, capture error, or worker shutdown — so a
-full queue can never become permanent.
+At most three dictations are outstanding, including completed results waiting
+for an earlier result in the same input context. The engine reserves a slot
+before capture starts and releases it on completion, timeout, or cancellation.
+The configured provider `timeout_sec` is measured from release, so audio
+processing and recognition share the same budget. A timeout advances delivery
+order and drops late results. Escape also discards buffered text and signals
+the task threads to stop; it is passed through when dictation is idle.
 
-One watchdog covers dropped key events. It runs every second and does two
-things: a recording older than `MaxRecordingSec` (default 120 s, configurable,
-0 = off) is force-stopped, and a debounce counter that saw no CapsLock traffic
-for 10 s is cleared.
+The event-loop watchdog ticks every 100 ms to enforce dictation deadlines,
+stop a recording older than `MaxRecordingSec` (default 120 s, 0 = off), and
+clear a debounce counter that saw no CapsLock traffic for 10 s.
 
 The periodic rearm is easy to get wrong: fcitx5 creates time events as
 ONESHOT, so a callback returning `true` keeps the source alive but does *not*
@@ -106,9 +106,8 @@ pub struct Input<'a> {
 
 - Providers receive a finished WAV path; they never open the microphone or
   touch fcitx5 types.
-- `cancel` is checked cooperatively. A cancelled request must return an error,
-  never silently produce nothing — the queue depends on exactly one outcome per
-  recording.
+- `cancel` is checked cooperatively. The engine owns delivery, so it can time
+  out a task or discard a canceled job even while that job is still unwinding.
 - Errors carry a `Category` (`ConfigMissing`, `AuthRejected`, `ModelNotFound`,
   `LocalSetup`, `Network`, `ServiceUnavailable`, `Timeout`, `NoSpeech`,
   `EmptyResult`, `AudioData`, `Runtime`, `ConfigInvalid`, `InvalidRequest`,
@@ -125,7 +124,11 @@ pub struct Input<'a> {
 | `mock` | none | nothing |
 
 Cloud requests are cancelled through libcurl's progress callback; local engines
-by killing the child. Both are bounded by the provider's `timeout_sec`.
+by killing the child. Successful HTTP transfers can return their handle to the
+pool. Handles are used exclusively during transfers and discarded on transport
+errors. Linux link, interface address, and route notifications invalidate the
+old network's cached connections and DNS. A confirmed Doubao task can resume
+querying with its original ID; audio uploads are not automatically replayed.
 
 ### Adding a backend
 
@@ -150,7 +153,8 @@ reported to the user. There is no third option.
 | Input context gone before commit | result goes to the currently focused context, logged |
 | `/dev/uinput` unavailable | one warning naming the udev rule; voice input still works |
 | Queue full | `recognition queue full; try again`, newest recording discarded |
-| Provider cancelled | returns `Timeout("cancelled")` so the queue advances |
+| Dictation deadline expires | reports a timeout and advances delivery order |
+| Escape during dictation | clears recording, recognition, and buffered results |
 
 ## Verification
 

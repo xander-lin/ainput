@@ -10,14 +10,14 @@ who want fast push-to-talk dictation without leaving the keyboard.
 ## Functional Goals And Scope
 
 - Push-to-talk capture (CapsLock hold), status UI via fcitx5 input panel,
-  consecutive-speech queueing (max 3 in-flight recognitions, FIFO order
-  preserved per app/input context).
+  at most three unfinished dictations, concurrent recognition with FIFO
+  text delivery per input context, and Escape to discard all pending work.
 - Pluggable ASR backends behind `IAsrProvider` / `IAsrProviderFactory` and the
   `AsrProviderRegistry`:
   - `mock` — deterministic test provider.
   - `zipformer`, `fire_red` — local providers via external `sherpa-onnx` binaries.
-  - `doubao` (ByteDance), `qwen` (Alibaba DashScope) — cloud providers via libcurl,
-    persistent serialized worker threads.
+  - `doubao` (ByteDance), `qwen` (Alibaba DashScope) — cloud providers via a
+    route-aware libcurl connection pool.
 - Audio capture with optional denoising; cloud failures surfaced as actionable
   status errors (network / service / timeout / microphone / no-speech).
 - Scope boundary: short-duration dictation only (≤ minutes). Long-audio
@@ -68,10 +68,10 @@ who want fast push-to-talk dictation without leaving the keyboard.
   type across it.
 - A new ASR backend is `rust/src/asr/<id>.rs` + one entry in `DESCRIPTORS`,
   `create()` and `docs/architecture.md`. Keep `mock` as the interface spec.
-- One recognition worker for the process; the pending counter is reserved
-  before anything is created and released exactly once on every path.
-  Cancellation is cooperative via `std::sync::atomic::AtomicBool` and must
-  still produce an error, never silence.
+- Each dictation runs in its own thread. Reserve capacity before starting work;
+  expire released recordings independently on the host event loop and never
+  deliver a late result. Escape explicitly discards results; other timeouts and
+  failures must resolve the original delivery slot with an error.
 - JSON uses `serde_json`; the old hand-written extraction is gone. Config files
   keep `//` comments, stripped by `config::strip_comments` in a
   string-aware, offset-preserving way.

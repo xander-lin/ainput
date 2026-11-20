@@ -22,11 +22,13 @@ application document.
 \fBCapsLock\fP (long-press, default 300ms)
 Start voice recording. Release to stop and transcribe.
 .PP
-Recording can start while an earlier cloud request is still recognizing.
-Ainput preserves recording and commit order and targets the input context that
-was active at the start of each recording. At most three recognitions,
-including the active one, are queued. A newer recording is discarded with an
-input-panel error when that limit is reached.
+Recognition jobs run concurrently. Ainput delivers their results in recording
+order within the original input context. At most three dictations can be
+outstanding. The provider timeout starts when CapsLock is released.
+.TP
+\fBEsc\fP
+Cancel all outstanding dictations, including recording and buffered results.
+When dictation is idle, Escape is passed through to the application.
 .TP
 \fBCtrl+CapsLock\fP
 Enter provider/denoiser switching mode. The notification shows the
@@ -159,13 +161,12 @@ PulseAudio capture
 .fi
 .RE
 .PP
-PulseAudio capture is asynchronous. On CapsLock release, Ainput returns
-control to fcitx5 immediately, retains a short audio tail, then starts
-processing and recognition.
+PulseAudio capture is asynchronous. On CapsLock release, the dictation thread
+finishes audio processing and starts recognition.
 .SH RELIABILITY
-Doubao and Qwen use persistent serialized workers, allowing curl connections
-to be reused while preserving result order. Zipformer and FireRed intentionally
-run one local process per utterance.
+Doubao and Qwen reuse successful curl connections on the same network. After
+network changes or transport errors the affected connections are discarded.
+Zipformer and FireRed run one local process per utterance.
 .SH FILES
 .TP
 .I ~/.config/fcitx5/conf/ainput.conf

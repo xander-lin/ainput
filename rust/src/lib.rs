@@ -26,6 +26,7 @@ mod engine;
 mod error;
 mod ffi;
 pub mod http;
+mod network;
 pub mod settings;
 mod templates;
 mod uinput;
@@ -189,6 +190,20 @@ pub extern "C" fn ainput_engine_stop(engine: *mut AinputEngine, recognition_id: 
 }
 
 #[no_mangle]
+pub extern "C" fn ainput_engine_tick(engine: *mut AinputEngine) {
+    if let Some(handle) = unsafe { engine.as_ref() } {
+        handle.engine.tick();
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn ainput_engine_cancel_all(engine: *mut AinputEngine) {
+    if let Some(handle) = unsafe { engine.as_ref() } {
+        handle.engine.cancel_all();
+    }
+}
+
+#[no_mangle]
 pub extern "C" fn ainput_engine_shutdown(engine: *mut AinputEngine) {
     if engine.is_null() {
         return;
@@ -238,8 +253,8 @@ pub extern "C" fn ainput_uinput_open() -> i32 {
 }
 
 #[no_mangle]
-pub extern "C" fn ainput_uinput_restore_capslock() {
-    uinput::restore_capslock();
+pub extern "C" fn ainput_uinput_restore_capslock() -> i32 {
+    i32::from(uinput::restore_capslock())
 }
 
 #[no_mangle]

@@ -4,15 +4,19 @@
 //! cancellation semantics match the previous C++ implementation while the
 //! error handling is Rust's.
 
+use std::cell::Cell;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
+use crate::network::{Network, SystemNetwork};
 use curl::easy::{Easy, List};
 
 #[derive(Debug)]
 pub enum TransportError {
     /// The caller asked to stop mid-transfer.
     Cancelled,
+    NetworkChanged,
     Timeout(String),
     Network(String),
 }
@@ -21,6 +25,7 @@ impl std::fmt::Display for TransportError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             TransportError::Cancelled => f.write_str("cancelled"),
+            TransportError::NetworkChanged => f.write_str("network changed during the request"),
             TransportError::Timeout(message) => f.write_str(message),
             TransportError::Network(message) => f.write_str(message),
         }
@@ -54,9 +59,8 @@ impl Response {
 /// DashScope that is 90-150 ms of pure overhead per request, which is an order
 /// of magnitude more than the entire DSP pipeline (see `examples/pipeline.rs`).
 ///
-/// One `Agent` keeps the connection alive across recognitions. The providers
-/// share a process-wide instance, and the worker thread serialises requests,
-/// so no locking is needed around the handle.
+/// An agent is checked out exclusively for one request and can be reused on
+/// the same network after a successful transfer.
 pub struct Agent {
     easy: Easy,
 }
@@ -86,6 +90,22 @@ impl Agent {
         timeout: Duration,
         cancel: &AtomicBool,
     ) -> Result<Response, TransportError> {
+        self.post_json_while(url, headers, body, timeout, || {
+            !cancel.load(Ordering::Acquire)
+        })
+    }
+
+    fn post_json_while(
+        &mut self,
+        url: &str,
+        headers: &[(&str, &str)],
+        body: &str,
+        timeout: Duration,
+        keep_running: impl Fn() -> bool,
+    ) -> Result<Response, TransportError> {
+        if !keep_running() {
+            return Err(TransportError::Cancelled);
+        }
         let easy = &mut self.easy;
         easy.url(url)
             .map_err(|e| TransportError::Network(e.to_string()))?;
@@ -134,7 +154,7 @@ impl Agent {
                 })
                 .map_err(|e| TransportError::Network(e.to_string()))?;
             transfer
-                .progress_function(|_, _, _, _| !cancel.load(Ordering::Relaxed))
+                .progress_function(|_, _, _, _| keep_running())
                 .map_err(|e| TransportError::Network(e.to_string()))?;
             transfer.perform()
         };
@@ -147,19 +167,7 @@ impl Agent {
             } else {
                 TransportError::Network(error.to_string())
             };
-            if !matches!(transport, TransportError::Timeout(_)) {
-                // A cancelled or failed transfer leaves the connection in an
-                // unknown state, and reusing it would poison later requests.
-                // `reset()` keeps libcurl's connection cache but drops every
-                // option, so the durable settings have to be re-applied.
-                easy.reset();
-                configure(&mut self.easy);
-            }
             return Err(transport);
-        }
-
-        if cancel.load(Ordering::Relaxed) {
-            return Err(TransportError::Cancelled);
         }
 
         let status = easy
@@ -180,7 +188,6 @@ impl Default for Agent {
     }
 }
 
-/// Options that must survive `Easy::reset()`.
 fn configure(easy: &mut Easy) {
     // Do not wedge a connection the peer silently dropped: a keep-alive socket
     // reused after the server's idle timeout otherwise shows up as a stall.
@@ -190,15 +197,90 @@ fn configure(easy: &mut Easy) {
     let _ = easy.connect_timeout(Duration::from_secs(10));
 }
 
-/// The process-wide client. The recognition worker is the only caller, so the
-/// `Mutex` is uncontended; it exists to satisfy `Sync`, not for contention.
-static AGENT: std::sync::Mutex<Option<Agent>> = std::sync::Mutex::new(None);
+pub struct Transport {
+    network: Arc<dyn Network>,
+    idle: Mutex<Vec<(u64, Agent)>>,
+}
+
+impl Transport {
+    pub(crate) fn system() -> Self {
+        Self::new(Arc::new(SystemNetwork::new()))
+    }
+
+    pub(crate) fn new(network: Arc<dyn Network>) -> Self {
+        Self {
+            network,
+            idle: Mutex::new(Vec::new()),
+        }
+    }
+
+    pub(crate) fn post_json(
+        &self,
+        id: u64,
+        stage: &str,
+        url: &str,
+        headers: &[(&str, &str)],
+        body: &str,
+        timeout: Duration,
+        cancel: &AtomicBool,
+    ) -> Result<Response, TransportError> {
+        if cancel.load(Ordering::Acquire) {
+            return Err(TransportError::Cancelled);
+        }
+        let generation = self.network.generation();
+        let mut agent = {
+            let mut idle = self.idle.lock().unwrap();
+            idle.retain(|(epoch, _)| *epoch == generation);
+            idle.pop().map(|(_, agent)| agent)
+        }
+        .unwrap_or_default();
+        if id != 0 {
+            crate::diagnostic::trace(id, stage);
+        }
+        let changed = Cell::new(false);
+        let result = agent.post_json_while(
+            url,
+            headers,
+            body,
+            timeout.max(Duration::from_millis(1)),
+            || {
+                if cancel.load(Ordering::Acquire) {
+                    return false;
+                }
+                let moved = self.network.generation() != generation;
+                if moved {
+                    changed.set(true);
+                }
+                !moved
+            },
+        );
+        let same_network = self.network.generation() == generation;
+        if cancel.load(Ordering::Acquire) {
+            return Err(TransportError::Cancelled);
+        }
+        if changed.get() || (result.is_err() && !same_network) {
+            return Err(TransportError::NetworkChanged);
+        }
+        if result.is_ok() && same_network {
+            let mut idle = self.idle.lock().unwrap();
+            if idle.len() < 3 {
+                idle.push((generation, agent));
+            }
+        }
+        // On any transport error drop the actual handle (and its caches).
+        result
+    }
+}
+
+pub(crate) fn default_transport() -> &'static Transport {
+    static TRANSPORT: OnceLock<Transport> = OnceLock::new();
+    TRANSPORT.get_or_init(Transport::system)
+}
 
 /// Drops the shared client, forcing the next request to build a new
 /// connection. Used by the A/B benchmark to reproduce the old behaviour.
 pub fn reset_agent() {
-    let mut slot = AGENT.lock().unwrap_or_else(|e| e.into_inner());
-    *slot = None;
+    default_transport().idle.lock().unwrap().clear();
 }
 
 /// Posts `body` as JSON, reusing the keep-alive connection.
@@ -209,14 +291,90 @@ pub fn post_json(
     timeout: Duration,
     cancel: &AtomicBool,
 ) -> Result<Response, TransportError> {
-    let mut slot = AGENT.lock().unwrap_or_else(|e| e.into_inner());
-    let agent = slot.get_or_insert_with(Agent::new);
-    agent.post_json(url, headers, body, timeout, cancel)
+    default_transport().post_json(0, "http", url, headers, body, timeout, cancel)
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+
+    pub fn read_request(stream: &mut std::net::TcpStream) -> String {
+        use std::io::Read;
+        stream
+            .set_read_timeout(Some(Duration::from_secs(4)))
+            .unwrap();
+        let mut bytes = Vec::new();
+        let mut byte = [0];
+        while !bytes.ends_with(b"\r\n\r\n") {
+            stream.read_exact(&mut byte).unwrap();
+            bytes.push(byte[0]);
+        }
+        let headers = String::from_utf8(bytes).unwrap();
+        let length = headers
+            .lines()
+            .find_map(|line| {
+                let (name, value) = line.split_once(':')?;
+                name.eq_ignore_ascii_case("Content-Length")
+                    .then(|| value.trim().parse().unwrap())
+            })
+            .unwrap_or(0);
+        stream.read_exact(&mut vec![0; length]).unwrap();
+        headers
+    }
+
+    #[test]
+    fn network_change_discards_reused_connection_and_unblocks_new_request() {
+        use std::io::Write;
+        use std::net::TcpListener;
+        use std::sync::mpsc;
+        use std::thread;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/recognize", listener.local_addr().unwrap());
+        let network = Arc::new(crate::network::MockNetwork::default());
+        let transport = Arc::new(Transport::new(network.clone()));
+        let (stalling, stalled) = mpsc::channel();
+        let (release, hold) = mpsc::channel();
+        let server = thread::spawn(move || {
+            let (mut old, _) = listener.accept().unwrap();
+            read_request(&mut old);
+            old.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nold")
+                .unwrap();
+            read_request(&mut old); // Must reuse the warmed connection.
+            stalling.send(()).unwrap();
+            let (mut fresh, _) = listener.accept().unwrap();
+            read_request(&mut fresh);
+            fresh
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 3\r\n\r\nnew")
+                .unwrap();
+            let _ = hold.recv_timeout(Duration::from_secs(4));
+        });
+        let post = |transport: &Transport, url: &str| {
+            transport.post_json(
+                0,
+                "http",
+                url,
+                &[],
+                "{}",
+                Duration::from_secs(3),
+                &AtomicBool::new(false),
+            )
+        };
+        assert_eq!(post(&transport, &url).unwrap().body, "old");
+        let old = {
+            let transport = transport.clone();
+            let url = url.clone();
+            thread::spawn(move || post(&transport, &url))
+        };
+        stalled.recv_timeout(Duration::from_secs(3)).unwrap();
+        network.0.fetch_add(1, Ordering::SeqCst);
+        assert_eq!(post(&transport, &url).unwrap().body, "new");
+        assert!(matches!(
+            old.join().unwrap(),
+            Err(TransportError::NetworkChanged)
+        ));
+        release.send(()).unwrap();
+        server.join().unwrap();
+    }
 
     #[test]
     fn header_lookup_is_case_insensitive() {

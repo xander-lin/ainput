@@ -79,6 +79,7 @@ enum {
 
 enum {
     AINPUT_STAGE_RECOGNIZING = 1,
+    AINPUT_MAX_PENDING = 3,
 };
 
 enum {
@@ -95,10 +96,14 @@ void ainput_engine_set_settings(AinputEngine *engine,
                                 const AinputSettings *settings);
 
 // Start recording; returns a recognition id, or 0 when the engine is not
-// ready. stop() finalises that recording and queues recognition.
+// ready. stop() ends capture and starts the task deadline.
 uint64_t ainput_engine_start(AinputEngine *engine);
 void ainput_engine_stop(AinputEngine *engine, uint64_t recognition_id);
-// Stops capture, drops the queue and joins workers. Engine must not be used
+// Tick deadlines on the host event loop. Cancel signals every outstanding
+// task without waiting; the shell must also discard buffered results.
+void ainput_engine_tick(AinputEngine *engine);
+void ainput_engine_cancel_all(AinputEngine *engine);
+// Cancels all tasks and joins their threads. Engine must not be used
 // afterwards except for ainput_engine_free().
 void ainput_engine_shutdown(AinputEngine *engine);
 
@@ -109,7 +114,8 @@ int32_t ainput_provider_display(size_t index, char *buf, size_t len);
 // Returns 1 on success, 0 when /dev/uinput could not be opened (the reason is
 // available from ainput_uinput_error()).
 int32_t ainput_uinput_open(void);
-void ainput_uinput_restore_capslock(void);
+// Returns 1 if the synthetic CapsLock press and release were sent.
+int32_t ainput_uinput_restore_capslock(void);
 void ainput_uinput_close(void);
 int32_t ainput_uinput_error(char *buf, size_t len);
 

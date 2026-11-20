@@ -26,6 +26,14 @@ pub fn enabled() -> bool {
     cfg!(feature = "diagnostics")
 }
 
+/// Minimal lifecycle trace for the fcitx5 journal. No request or speech data.
+pub fn trace(id: u64, stage: &str) {
+    let _ = writeln!(std::io::stderr().lock(), "Ainput: id={id} stage={stage}");
+    if enabled() {
+        event("engine", stage, &[("recognition_id", id.to_string())]);
+    }
+}
+
 fn log_path() -> PathBuf {
     if let Ok(path) = std::env::var("AINPUT_DIAGNOSTIC_LOG") {
         if !path.is_empty() {

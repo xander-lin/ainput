@@ -146,7 +146,7 @@ API keys are plaintext fields by design; there is no secret-store integration.
 | `vocabulary_id` | `""` | Precompiled hot-word list id |
 | `keep_dialect` | `false` | Keep dialect wording (`qwen-audio-3.1-asr-flash` only) |
 | `speaker_diarization` | `false` | Label speakers (`qwen-audio-3.1-asr-flash` only) |
-| `timeout_sec` | `60` | Whole-request timeout |
+| `timeout_sec` | `60` | Dictation budget from release, including audio processing and the cloud request |
 
 ### `doubao.json`
 
@@ -157,7 +157,7 @@ API keys are plaintext fields by design; there is no secret-store integration.
 | `model_name` | `bigmodel` | Sent as `request.model_name` |
 | `enable_itn` | `true` | Inverse text normalization |
 | `enable_punc` | `true` | Punctuation restoration |
-| `timeout_sec` | `90` | Whole-recognition budget: submit and polling share it |
+| `timeout_sec` | `90` | Dictation budget from release: audio processing, submit, and polling share it |
 
 ### `zipformer.json` / `fire_red.json`
 
@@ -165,7 +165,7 @@ API keys are plaintext fields by design; there is no secret-store integration.
 |-----|---------|---------|
 | `model_dir` | `~/.local/share/ainput/models/...` | Model directory |
 | `bin_path` | `~/.local/share/ainput/sherpa-onnx/bin/...` | Engine binary |
-| `timeout_sec` | `120` | Wall-clock timeout for one recognition |
+| `timeout_sec` | `120` | Dictation budget from release, including audio processing and local inference |
 
 ## Validation
 

@@ -73,9 +73,9 @@ Unit coverage by area:
 | `templates` | every template parses, passes its schema, and lists every field |
 | `dsp` | gate behaviour on tones vs impulses, normalization, resampling length, trimming |
 | `wav` | round trip, rejection of non-WAV input |
-| `engine` | queue limit, settings clamping, provider selection, end-to-end callback (ignored) |
+| `engine` | queue limit, provider selection, cancellation, deadline recovery, real microphone callback (ignored) |
 | `uinput` | ioctl numbers are derived, not hard-coded |
-| `http` | case-insensitive header lookup |
+| `http` | header lookup, replacing connections on transport failure or network change |
 | `diagnostic` | hash stability, civil-date conversion |
 
 Tests that touch files set `HOME` to a temporary directory. The old C++ suite
@@ -84,6 +84,9 @@ do not reintroduce a test that constructs configuration-reading code without
 isolating `HOME`.
 
 ## Diagnostics
+
+The standard fcitx5 journal identifies each dictation by `id=` and `stage=`,
+from recording release through provider requests, deadline/error, and commit.
 
 A `-Ddiagnostic_logging=true` build appends one JSON object per line to
 `~/.local/share/ainput/diagnostic.log`. `AINPUT_DIAGNOSTIC_LOG` overrides the
@@ -99,8 +102,8 @@ cp ~/.local/share/ainput/diagnostic.log /tmp/ainput-diagnostic.log
 
 Useful events: `engine/settings_applied`, `audio/capture_started`,
 `audio/capture_stopped`, `engine/recognition_queued`,
-`engine/recognition_result`, `engine/recognition_error`,
-`engine/recognition_aborted`, `uinput/error`.
+`engine/recognition_result`, `engine/recognition_deadline`,
+`engine/recording_cancelled`, `uinput/error`.
 
 ## Audio pipeline
 

@@ -5,12 +5,12 @@
 #include <fcitx-utils/event.h>
 
 #include <cstdint>
-#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
-#include <unordered_map>
 #include <vector>
+
+#include "delivery_queue.h"
 
 namespace ainput {
 
@@ -44,11 +44,16 @@ public:
     void rememberTarget(uint64_t recognitionId);
 
     void submit(uint64_t recognitionId, const std::string &text);
+    void fail(uint64_t recognitionId, const std::string &text);
     void showStatus(uint64_t recognitionId, const std::string &text);
     void showStage(uint64_t recognitionId, Stage stage);
 
     /// Shows a message about the addon itself (no recording attached).
     void showGlobalStatus(const std::string &text);
+
+    // Event-loop thread only. Includes completed results waiting for their turn.
+    size_t pendingCount() const { return targets_.size(); }
+    void discardAll();
 
 private:
     fcitx::Instance *instance_;
@@ -56,29 +61,22 @@ private:
     int wakePipe_[2] = {-1, -1};
     std::unique_ptr<fcitx::EventSourceIO> wakeWatcher_;
 
+    enum class Kind { Status, Text, Error };
     struct Pending {
         std::string text;
-        bool isStatus = false;
-        uint64_t recognitionId = 0;
-        // Status messages from an older recording must not overwrite a newer
-        // one; recorded when the message is enqueued.
-        uint64_t sequence = 0;
-        fcitx::ICUUID explicitUuid = {};
-        std::function<void()> completion;
+        Kind kind;
+        uint64_t recognitionId;
     };
     std::mutex pendingMutex_;
     std::vector<Pending> pending_;
 
-    /// recognition id -> uuid captured when recording started. Event loop only.
-    std::unordered_map<uint64_t, fcitx::ICUUID> targets_;
-    uint64_t latestStatusSequence_ = 0;
+    using Results = DeliveryQueue<fcitx::ICUUID, Pending>;
+    Results targets_;
 
     void enqueue(Pending pending);
     void drainAndCommit();
-    void commitPending(Pending pending);
-    void showStatusNow(const fcitx::ICUUID &uuid, const std::string &text,
-                       uint64_t sequence);
-    fcitx::ICUUID resolve(const Pending &pending);
+    void commitPending(const Results::Entry &entry);
+    void showStatusNow(const fcitx::ICUUID &uuid, const std::string &text);
     void wake();
 };
 

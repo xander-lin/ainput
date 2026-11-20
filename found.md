@@ -687,3 +687,61 @@
     test to name the shared state before adding sleeps or retries.
   - Run the suite in a loop (8x here) after changing test isolation. A green
     single run proves nothing when the failure rate is 1 in 4.
+
+## 22. A recognition backlog was invisible in the standard logs (found 2026-11)
+
+- **Mistake/context**: A user reported that one stalled recognition took
+  later recordings with it and that restarting fcitx5 restored dictation. The
+  journal showed three recordings starting without a text commit, followed by
+  three starts being refused. One more recording was accepted before restart.
+  The first recording after restart committed successfully.
+- **Root cause**: All recordings share one synchronous recognition worker.
+  Capacity is reserved at capture start; a provider call that has not returned
+  blocks later recognition, and eventually no slot is available for recording.
+  The standard journal reports a generic start refusal; provider errors and
+  audio/queue details are only in the panel or the optional diagnostic log.
+  The exact cause of the first delay in this incident remains unknown. Doubao's
+  default 90-second submit/poll budget begins inside the worker and excludes
+  queue time.
+- **Correction**: Isolated work onto per-dictation threads, added a release-time
+  deadline and per-context delivery order, and added correlated stage logging.
+- **Prevention**: Correlate release, queue entry, provider start/outcome, and
+  text commit by recording ID in the normal log. For scheduler changes, use a
+  deterministic test where one request stalls while another can finish; verify
+  in-order delivery, slot recovery, and continued recognition without restart.
+
+## 23. Resetting libcurl options does not invalidate its network caches
+
+- **Mistake/context**: The HTTP client is meant to evict failed handles, but
+  the timeout branch leaves the shared handle untouched, and other transfer
+  errors only call `Easy::reset()`. There is no route-change listener. This
+  does not establish that a stale connection caused the stall in #22.
+- **Root cause**: [`curl_easy_reset`](https://curl.se/libcurl/c/curl_easy_reset.html)
+  resets request options but preserves connection and DNS caches. TCP keepalive
+  can detect a dead peer; it does not invalidate caches on a network change.
+- **Correction**: Drop the whole easy handle on transport failure. A network
+  generation based on Linux route notifications prevents reuse across changes.
+- **Prevention**: Verify recovery with a warmed connection and a simulated
+  route change or transport timeout. Assert that the next request opens a new
+  connection without waiting for the previous transfer or restarting fcitx5.
+
+## 24. Meson build directories retain absolute checkout paths
+
+- **Mistake/context**: The C++ shell built from the current checkout but Rust
+  symbols added alongside it failed at link time.
+- **Root cause**: `build/build.ninja` still pointed its Cargo command at a
+  different checkout. The shell and archive came from different source trees.
+- **Correction**: Configured a fresh Meson build from the current checkout.
+- **Prevention**: After relocating a checkout, configure a fresh build directory
+  and verify Meson's printed source directory before trusting build or test results.
+
+## 25. Failed CapsLock restoration swallowed the next real key events
+
+- **Mistake/context**: An isolated fcitx5 session without `/dev/uinput`
+  cancelled a recording on Escape but refused the next CapsLock press.
+- **Root cause**: The shell unconditionally ignored two events even when the
+  Rust injection function had sent none.
+- **Correction**: Only arm the event counter when uinput confirms that it sent
+  both synthetic events.
+- **Prevention**: Exercise a second recording after cancellation in a session
+  without a uinput device, using the fcitx5 frontend and real key handling.

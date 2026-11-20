@@ -94,3 +94,4 @@ test('rust-unit',
   find_program('rust/run-tests.sh'),
   args: [meson.project_source_root(), rust_features],
   timeout: 300)
+test('delivery-order', executable('delivery-queue-test', 'shell/delivery_queue_test.cpp'))

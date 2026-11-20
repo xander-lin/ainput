@@ -42,7 +42,7 @@ pub fn qwen() -> String {
     // qwen-audio-3.1-asr-flash only: label speakers in the result.
     "speaker_diarization": false,
 
-    // Whole-request timeout in seconds.
+    // Timeout in seconds from key release, including audio processing.
     "timeout_sec": 60
 }}
 "#,
@@ -70,8 +70,8 @@ pub fn doubao() -> String {
     // Punctuation restoration in the result.
     "enable_punc": true,
 
-    // Whole-recognition budget in seconds. Submit and result polling share
-    // this single deadline.
+    // Timeout in seconds from key release, including audio processing,
+    // submit and result polling.
     "timeout_sec": 90
 }}
 "#,
@@ -93,7 +93,7 @@ pub fn zipformer() -> String {
     // Absolute path or ~-prefixed path to the sherpa-onnx binary.
     "bin_path": "~/.local/share/ainput/sherpa-onnx/bin/sherpa-onnx",
 
-    // Wall-clock timeout for one recognition, in seconds.
+    // Timeout in seconds from key release, including audio processing.
     "timeout_sec": 120
 }
 "#
@@ -113,7 +113,7 @@ pub fn fire_red() -> String {
     // Path to the sherpa-onnx-offline binary.
     "bin_path": "~/.local/share/ainput/sherpa-onnx/bin/sherpa-onnx-offline",
 
-    // Wall-clock timeout for one recognition, in seconds.
+    // Timeout in seconds from key release, including audio processing.
     "timeout_sec": 120
 }
 "#

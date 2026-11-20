@@ -12,6 +12,7 @@ pub mod sherpa;
 use std::path::Path;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use crate::config;
 use crate::error::Result;
@@ -24,8 +25,62 @@ pub struct Input<'a> {
     pub credentials: &'a crate::settings::Credentials,
 }
 
+#[derive(Clone, Copy)]
+pub struct Context<'a> {
+    pub id: u64,
+    pub client: &'a crate::http::Transport,
+    pub deadline: Option<Instant>,
+}
+
+impl Context<'_> {
+    fn deadline(self, fallback: Duration) -> Instant {
+        let now = Instant::now();
+        match (self.deadline, now.checked_add(fallback)) {
+            (Some(a), Some(b)) => a.min(b),
+            (Some(a), None) | (None, Some(a)) => a,
+            (None, None) => now + Duration::from_secs(120),
+        }
+    }
+
+    fn remaining(self, fallback: Duration) -> Result<Duration> {
+        self.deadline(fallback).checked_duration_since(Instant::now())
+            .filter(|left| !left.is_zero())
+            .ok_or_else(|| crate::error::Error::timeout("dictation deadline exceeded"))
+    }
+}
+
+impl Default for Context<'_> {
+    fn default() -> Self {
+        Self { id: 0, client: crate::http::default_transport(), deadline: None }
+    }
+}
+
 pub trait Provider: Send {
     fn transcribe(&self, input: &Input<'_>) -> Result<String>;
+
+    fn transcribe_with(&self, input: &Input<'_>, _context: Context<'_>) -> Result<String> {
+        self.transcribe(input)
+    }
+}
+
+pub fn default_timeout(provider: &str) -> Duration {
+    Duration::from_secs(match provider {
+        "qwen" => 60,
+        "doubao" => 90,
+        "mock" => 5,
+        _ => 120,
+    })
+}
+
+pub fn task_timeout(provider: &str, default: Duration) -> Duration {
+    if !matches!(provider, "qwen" | "doubao" | "zipformer" | "fire_red") {
+        return default;
+    }
+    config::read_json(&format!("{provider}.json"))
+        .ok().flatten()
+        .and_then(|value| value.get("timeout_sec")?.as_u64())
+        .filter(|&secs| secs > 0)
+        .map_or(default, Duration::from_secs)
 }
 
 pub struct Descriptor {

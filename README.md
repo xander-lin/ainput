@@ -68,6 +68,7 @@ CapsLock restore. See [Troubleshooting](#troubleshooting).
 | Action | Keys |
 |--------|------|
 | Voice input | Hold **CapsLock** → speak → release |
+| Cancel pending dictation | Press **Esc** to discard all unfinished dictation |
 | Switch ASR provider | **Ctrl+CapsLock**, then **← / →** (or **h / l**) |
 | Switch denoiser | **Ctrl+CapsLock**, then **↑ / ↓** (or **k / j**) |
 

@@ -197,10 +197,9 @@ fn last_line(output: &str) -> String {
 
 fn run_child(
     child: &mut Child,
-    timeout: Duration,
+    deadline: Instant,
     cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) -> Result<()> {
-    let deadline = Instant::now() + timeout;
     loop {
         if cancel.load(Ordering::Relaxed) {
             let _ = child.kill();
@@ -227,6 +226,10 @@ fn run_child(
 
 impl Provider for Sherpa {
     fn transcribe(&self, input: &Input<'_>) -> Result<String> {
+        self.transcribe_with(input, super::Context::default())
+    }
+
+    fn transcribe_with(&self, input: &Input<'_>, context: super::Context<'_>) -> Result<String> {
         let settings = self.settings()?;
         let label = self.label();
 
@@ -248,6 +251,10 @@ impl Provider for Sherpa {
             }
         }
 
+        let deadline = context.deadline(Duration::from_secs(settings.timeout_secs));
+        if input.cancel.load(Ordering::Acquire) || Instant::now() >= deadline {
+            return Err(Error::timeout("cancelled or expired before starting local engine"));
+        }
         let args = self.arguments(&settings, input.wav_path);
         let mut child = Command::new(&settings.bin_path)
             .args(&args)
@@ -263,7 +270,7 @@ impl Provider for Sherpa {
 
         run_child(
             &mut child,
-            Duration::from_secs(settings.timeout_secs),
+            deadline,
             input.cancel,
         )?;
 

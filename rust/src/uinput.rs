@@ -172,13 +172,13 @@ pub fn open() -> bool {
 ///
 /// The two events go in separate SYN frames: niri accepts a combined frame,
 /// some compositors fold it away.
-pub fn restore_capslock() {
+pub fn restore_capslock() -> bool {
     let mut slot = match DEVICE.lock() {
         Ok(slot) => slot,
         Err(poisoned) => poisoned.into_inner(),
     };
     let Some(file) = slot.as_mut() else {
-        return;
+        return false;
     };
 
     let events = [
@@ -217,10 +217,11 @@ pub fn restore_capslock() {
         if let Err(err) = file.write_all(bytes) {
             drop(slot);
             set_error(format!("cannot write to /dev/uinput: {err}"));
-            return;
+            return false;
         }
     }
     diagnostic::event("uinput", "capslock_restored", &[]);
+    true
 }
 
 /// Destroys the virtual keyboard. Called at shutdown.

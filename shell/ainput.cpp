@@ -88,7 +88,7 @@ namespace {
 
 /// How often the stale-state checks run. The recording limit itself is
 /// configurable (`MaxRecordingSec`).
-constexpr uint64_t kWATCHDOG_US = 1'000'000;
+constexpr uint64_t kWATCHDOG_US = 100'000;
 /// Idle time after which a stale key debounce counter is cleared, so one lost
 /// synthetic event cannot swallow every later CapsLock press.
 constexpr auto kDebounceIdleReset = std::chrono::seconds(10);
@@ -265,7 +265,7 @@ private:
     }
 
     void onError(uint64_t id, int32_t category, const char *detail) {
-        output_->showStatus(id, statusForError(category, detail ? detail : ""));
+        output_->fail(id, statusForError(category, detail ? detail : ""));
     }
 
     void onStage(uint64_t id, int32_t stage) {
@@ -502,6 +502,19 @@ private:
     // ---- key handling ----
 
     void onKeyEvent(fcitx::KeyEvent &keyEvent) {
+        if (keyEvent.key().sym() == FcitxKey_Escape) {
+            const bool release = keyEvent.isRelease();
+            const bool repeat = keyEvent.rawKey().states().test(fcitx::KeyState::Repeat);
+            if (!release && !repeat) {
+                escConsumed_ = timer_ || active_ || output_->pendingCount();
+                if (escConsumed_) cancelDictation();
+            }
+            if (escConsumed_) {
+                if (release) escConsumed_ = false;
+                keyEvent.filterAndAccept();
+            }
+            return;
+        }
         const bool capsLock = keyEvent.key().sym() == FcitxKey_Caps_Lock;
         if (!capsLock && !active_ && !switchActive_ && !timer_) {
             return;
@@ -511,6 +524,17 @@ private:
             lastCapsEvent_ = Clock::now();
             if (revertDebounce_ > 0) {
                 --revertDebounce_;
+                return;
+            }
+            if (cancelledHold_) {
+                if (keyEvent.isRelease()) {
+                    cancelledHold_ = false;
+                    if (restoreCancelledHold_) {
+                        restoreCancelledHold_ = false;
+                        restoreCapsLock();
+                    }
+                }
+                keyEvent.filterAndAccept();
                 return;
             }
         }
@@ -525,8 +549,7 @@ private:
                 deactivate();
             } else if (switchActive_) {
                 switchActive_ = false;
-                revertDebounce_ = kRestoreDebounceEvents;
-                ainput_uinput_restore_capslock();
+                restoreCapsLock();
             } else {
                 timer_.reset();
             }
@@ -618,12 +641,17 @@ private:
             return;
         }
 
+        if (output_->pendingCount() >= AINPUT_MAX_PENDING) {
+            FCITX_INFO() << "Ainput: id=0 stage=queue_full";
+            output_->showGlobalStatus("Ainput: recognition queue full; try again");
+            return;
+        }
         activeId_ = ainput_engine_start(engine_);
         if (activeId_ == 0) {
             FCITX_INFO() << "Ainput: recording did not start";
             return;
         }
-        FCITX_INFO() << "Ainput: recording started, id=" << activeId_;
+        FCITX_INFO() << "Ainput: id=" << activeId_ << " stage=recording_started";
 
         // Event loop thread: safe to ask fcitx5 which context is focused.
         output_->rememberTarget(activeId_);
@@ -641,13 +669,31 @@ private:
         activeId_ = 0;
         output_->showStatus(id, "Ainput: processing audio...");
         ainput_engine_stop(engine_, id);
-        revertDebounce_ = kRestoreDebounceEvents;
+        restoreCapsLock();
+    }
+
+    void restoreCapsLock() {
+        revertDebounce_ = ainput_uinput_restore_capslock() ? kRestoreDebounceEvents : 0;
+    }
+
+    void cancelDictation() {
+        lastCapsEvent_ = Clock::now();
+        if (timer_ || active_) cancelledHold_ = true;
+        timer_.reset();
+        ainput_engine_cancel_all(engine_);
+        output_->discardAll();
+        if (active_) {
+            active_ = false;
+            activeId_ = 0;
+            restoreCancelledHold_ = true;
+        }
     }
 
     /// Recovers from a dropped key event: a recording that outlived
     /// `MaxRecordingSec` is stopped, and a debounce counter that has had no
     /// CapsLock traffic for kDebounceIdleReset is cleared.
     void checkStaleState() {
+        ainput_engine_tick(engine_);
         lastWatchdog_ = Clock::now();
         const auto now = lastWatchdog_;
         const int limitSec = config_.maxRecordingSec.value();
@@ -660,6 +706,14 @@ private:
         if (revertDebounce_ > 0 && now - lastCapsEvent_ > kDebounceIdleReset) {
             FCITX_WARN() << "Ainput: clearing a stale key debounce counter";
             revertDebounce_ = 0;
+        }
+        if (cancelledHold_ && now - lastCapsEvent_ > kDebounceIdleReset) {
+            cancelledHold_ = false;
+            if (restoreCancelledHold_) {
+                restoreCancelledHold_ = false;
+                lastCapsEvent_ = now;
+                restoreCapsLock();
+            }
         }
     }
 
@@ -675,6 +729,9 @@ private:
     bool watchdogWarned_ = false;
     bool active_ = false;
     bool switchActive_ = false;
+    bool escConsumed_ = false;
+    bool cancelledHold_ = false;
+    bool restoreCancelledHold_ = false;
     uint64_t activeId_ = 0;
     int revertDebounce_ = 0;
     Clock::time_point pressTime_{};

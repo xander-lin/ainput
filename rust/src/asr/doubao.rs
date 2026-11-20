@@ -12,8 +12,8 @@ use serde_json::{json, Value};
 use super::{Input, Provider};
 use crate::config;
 use crate::error::{Category, Error, Result};
+use crate::http::{Response, TransportError};
 use crate::settings::Credentials;
-use crate::http::{self, Response, TransportError};
 use crate::templates;
 
 const SUBMIT_URL: &str = "https://openspeech.bytedance.com/api/v3/auc/bigmodel/submit";
@@ -108,8 +108,7 @@ impl Settings {
 }
 
 fn base64_encode(data: &[u8]) -> String {
-    const TABLE: &[u8; 64] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
     for chunk in data.chunks(3) {
         let b0 = chunk[0] as u32;
@@ -196,36 +195,54 @@ fn message_of(body: &Value, headers: &Response, fallback: &str) -> String {
 
 impl Provider for Doubao {
     fn transcribe(&self, input: &Input<'_>) -> Result<String> {
+        self.transcribe_with(input, super::Context::default())
+    }
+
+    fn transcribe_with(&self, input: &Input<'_>, context: super::Context<'_>) -> Result<String> {
         let settings = Settings::load(input.credentials)?;
-        if input.cancel.load(Ordering::Relaxed) {
-            return Err(Error::timeout("cancelled"));
+        recognize(input, context, settings, [SUBMIT_URL, QUERY_URL])
+    }
+}
+
+fn recognize(
+    input: &Input<'_>,
+    context: super::Context<'_>,
+    settings: Settings,
+    [submit_url, query_url]: [&str; 2],
+) -> Result<String> {
+    if input.cancel.load(Ordering::Relaxed) {
+        return Err(Error::timeout("cancelled"));
+    }
+
+    let bytes = std::fs::read(input.wav_path)
+        .map_err(|e| Error::audio_data(format!("cannot read WAV: {e}")))?;
+    if bytes.len() <= 44 {
+        return Err(Error::audio_data("recorded WAV is empty"));
+    }
+
+    let deadline = context.deadline(Duration::from_secs(settings.timeout_secs.max(1) as u64));
+    let task_id = request_id();
+
+    // ---- submit ----
+    let submit_body = json!({
+        "audio": {
+            "format": "wav",
+            "data": base64_encode(&bytes)
+        },
+        "request": {
+            "model_name": settings.model_name,
+            "enable_itn": settings.enable_itn,
+            "enable_punc": settings.enable_punc
         }
+    })
+    .to_string();
 
-        let bytes = std::fs::read(input.wav_path)
-            .map_err(|e| Error::audio_data(format!("cannot read WAV: {e}")))?;
-        if bytes.len() <= 44 {
-            return Err(Error::audio_data("recorded WAV is empty"));
-        }
-
-        let deadline = Instant::now() + Duration::from_secs(settings.timeout_secs.max(1) as u64);
-        let task_id = request_id();
-
-        // ---- submit ----
-        let submit_body = json!({
-            "audio": {
-                "format": "wav",
-                "data": base64_encode(&bytes)
-            },
-            "request": {
-                "model_name": settings.model_name,
-                "enable_itn": settings.enable_itn,
-                "enable_punc": settings.enable_punc
-            }
-        })
-        .to_string();
-
-        let submit = http::post_json(
-            SUBMIT_URL,
+    let submit = context
+        .client
+        .post_json(
+            context.id,
+            "doubao_submit",
+            submit_url,
             &[
                 ("X-Api-Key", settings.api_key.as_str()),
                 ("X-Api-Resource-Id", settings.resource_id.as_str()),
@@ -233,82 +250,109 @@ impl Provider for Doubao {
                 ("X-Api-Sequence", "-1"),
             ],
             &submit_body,
-            Duration::from_secs(remaining_secs(deadline).clamp(1, 30) as u64),
+            remaining(deadline)?.min(Duration::from_secs(30)),
             input.cancel,
         )
         .map_err(|err| classify_transport("submit", err))?;
 
-        let code = submit.header("X-Api-Status-Code").unwrap_or_default();
-        if code != STATUS_SUCCESS {
-            return Err(explain(&submit, &code, input.cancel));
-        }
+    let code = submit.header("X-Api-Status-Code").unwrap_or_default();
+    if code != STATUS_SUCCESS {
+        return Err(explain(&submit, &code, input.cancel));
+    }
 
-        // ---- poll ----
-        //
-        // Query immediately, then back off. Sleeping first cost a fixed 300 ms
-        // on every recognition even when the transcript was ready by the time
-        // the submit response came back — which for short utterances is the
-        // common case.
-        let mut interval = Duration::ZERO;
-        loop {
-            if input.cancel.load(Ordering::Relaxed) {
+    // ---- poll ----
+    //
+    // Query immediately, then back off. Sleeping first cost a fixed 300 ms
+    // on every recognition even when the transcript was ready by the time
+    // the submit response came back — which for short utterances is the
+    // common case.
+    let mut interval = Duration::ZERO;
+    let mut retried_query = false;
+    if context.id != 0 {
+        crate::diagnostic::trace(context.id, "doubao_query");
+    }
+    loop {
+        if input.cancel.load(Ordering::Relaxed) {
+            return Err(Error::timeout("cancelled"));
+        }
+        let until = Instant::now() + interval.min(remaining(deadline)?);
+        while let Some(wait) = until.checked_duration_since(Instant::now()) {
+            if input.cancel.load(Ordering::Acquire) {
                 return Err(Error::timeout("cancelled"));
             }
-            if Instant::now() >= deadline {
-                return Err(Error::timeout("Doubao recognition timed out"));
+            std::thread::sleep(wait.min(Duration::from_millis(20)));
+        }
+        // Start short, then settle: the first few hundred milliseconds are
+        // where a fast answer shows up, and after that polling faster than
+        // the server can finish only burns requests.
+        interval = if interval.is_zero() {
+            Duration::from_millis(120)
+        } else {
+            (interval * 2).min(Duration::from_millis(800))
+        };
+
+        let query = context.client.post_json(
+            0,
+            "doubao_query",
+            query_url,
+            &[
+                ("X-Api-Key", settings.api_key.as_str()),
+                ("X-Api-Resource-Id", settings.resource_id.as_str()),
+                ("X-Api-Request-Id", task_id.as_str()),
+            ],
+            "{}",
+            remaining(deadline)?,
+            input.cancel,
+        );
+        let query = match query {
+            Ok(query) => {
+                retried_query = false;
+                query
             }
-            if !interval.is_zero() {
-                let wait = interval.min(deadline.saturating_duration_since(Instant::now()));
-                if !wait.is_zero() {
-                    std::thread::sleep(wait);
+            Err(TransportError::NetworkChanged) => {
+                // Submit was confirmed: resume polling the same task ID.
+                if context.id != 0 {
+                    crate::diagnostic::trace(context.id, "doubao_query_reconnect");
                 }
-            }
-            // Start short, then settle: the first few hundred milliseconds are
-            // where a fast answer shows up, and after that polling faster than
-            // the server can finish only burns requests.
-            interval = if interval.is_zero() {
-                Duration::from_millis(120)
-            } else {
-                (interval * 2).min(Duration::from_millis(800))
-            };
-
-            let query = http::post_json(
-                QUERY_URL,
-                &[
-                    ("X-Api-Key", settings.api_key.as_str()),
-                    ("X-Api-Resource-Id", settings.resource_id.as_str()),
-                    ("X-Api-Request-Id", task_id.as_str()),
-                ],
-                "{}",
-                Duration::from_secs(remaining_secs(deadline).max(1) as u64),
-                input.cancel,
-            )
-            .map_err(|err| classify_transport("query", err))?;
-
-            let code = query.header("X-Api-Status-Code").unwrap_or_default();
-            if code == STATUS_SUCCESS {
-                let body: Value = serde_json::from_str(&query.body).unwrap_or(Value::Null);
-                return match extract_text(&body) {
-                    Some(text) => Ok(text),
-                    None => Err(Error::empty_result("Doubao returned no text")),
-                };
-            }
-            if code == STATUS_IN_QUEUE || code == STATUS_PROCESSING {
                 continue;
             }
-            return Err(explain(&query, &code, input.cancel));
+            Err(TransportError::Network(_)) if !retried_query => {
+                // The route may already have changed before this query
+                // began. Retry once on a fresh handle once it settles.
+                retried_query = true;
+                continue;
+            }
+            Err(err) => return Err(classify_transport("query", err)),
+        };
+
+        let code = query.header("X-Api-Status-Code").unwrap_or_default();
+        if code == STATUS_SUCCESS {
+            let body: Value = serde_json::from_str(&query.body).unwrap_or(Value::Null);
+            return match extract_text(&body) {
+                Some(text) => Ok(text),
+                None => Err(Error::empty_result("Doubao returned no text")),
+            };
         }
+        if code == STATUS_IN_QUEUE || code == STATUS_PROCESSING {
+            continue;
+        }
+        return Err(explain(&query, &code, input.cancel));
     }
 }
 
-fn remaining_secs(deadline: Instant) -> i64 {
-    let remaining = deadline.saturating_duration_since(Instant::now());
-    (remaining.as_secs() as i64).max(1)
+fn remaining(deadline: Instant) -> Result<Duration> {
+    deadline
+        .checked_duration_since(Instant::now())
+        .filter(|left| !left.is_zero())
+        .ok_or_else(|| Error::timeout("Doubao recognition timed out"))
 }
 
 fn classify_transport(stage: &str, err: TransportError) -> Error {
     match err {
         TransportError::Cancelled => Error::timeout("cancelled"),
+        TransportError::NetworkChanged => {
+            Error::network(format!("network changed during Doubao {stage}"))
+        }
         TransportError::Timeout(message) => {
             Error::timeout(format!("Doubao {stage} timed out: {message}"))
         }
@@ -318,7 +362,11 @@ fn classify_transport(stage: &str, err: TransportError) -> Error {
     }
 }
 
-fn explain(response: &Response, code: &str, cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>) -> Error {
+fn explain(
+    response: &Response,
+    code: &str,
+    cancel: &std::sync::Arc<std::sync::atomic::AtomicBool>,
+) -> Error {
     if cancel.load(Ordering::Relaxed) {
         return Error::timeout("cancelled");
     }
@@ -348,6 +396,84 @@ fn explain(response: &Response, code: &str, cancel: &std::sync::Arc<std::sync::a
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn confirmed_submit_keeps_task_id_when_query_moves_to_new_network() {
+        use crate::http::tests::read_request;
+        use crate::network::MockNetwork;
+        use std::io::Write;
+        use std::net::TcpListener;
+        use std::sync::atomic::AtomicBool;
+        use std::sync::{mpsc, Arc};
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let network = Arc::new(MockNetwork::default());
+        let client = crate::http::Transport::new(network.clone());
+        let (done, completed) = mpsc::channel();
+        let server = std::thread::spawn(move || {
+            fn task_id(request: &str) -> &str {
+                request
+                    .lines()
+                    .find_map(|line| {
+                        let (name, value) = line.split_once(':')?;
+                        name.eq_ignore_ascii_case("X-Api-Request-Id")
+                            .then(|| value.trim())
+                    })
+                    .unwrap()
+            }
+            let (mut old, _) = listener.accept().unwrap();
+            let submit = read_request(&mut old);
+            assert!(submit.starts_with("POST /submit "));
+            old.write_all(
+                b"HTTP/1.1 200 OK\r\nX-Api-Status-Code: 20000000\r\nContent-Length: 0\r\n\r\n",
+            )
+            .unwrap();
+            let query = read_request(&mut old);
+            assert!(query.starts_with("POST /query "));
+            assert_eq!(task_id(&query), task_id(&submit));
+            network.0.fetch_add(1, Ordering::SeqCst);
+
+            let (mut fresh, _) = listener.accept().unwrap();
+            let retry = read_request(&mut fresh);
+            assert!(
+                retry.starts_with("POST /query "),
+                "audio must not be uploaded again"
+            );
+            assert_eq!(task_id(&retry), task_id(&submit));
+            let body = r#"{"result":{"text":"recovered"}}"#;
+            write!(fresh, "HTTP/1.1 200 OK\r\nX-Api-Status-Code: 20000000\r\nContent-Length: {}\r\n\r\n{body}", body.len()).unwrap();
+            let _ = completed.recv_timeout(Duration::from_secs(5));
+        });
+        let wav_path =
+            std::env::temp_dir().join(format!("ainput-doubao-recovery-{}.wav", std::process::id()));
+        crate::wav::write(&wav_path, &[1; 1600]).unwrap();
+        let result = recognize(
+            &Input {
+                wav_path: &wav_path,
+                cancel: &Arc::new(AtomicBool::new(false)),
+                credentials: &Credentials::default(),
+            },
+            super::super::Context {
+                id: 0,
+                client: &client,
+                deadline: None,
+            },
+            Settings {
+                api_key: "test".into(),
+                resource_id: "test".into(),
+                model_name: "bigmodel".into(),
+                enable_itn: true,
+                enable_punc: true,
+                timeout_secs: 5,
+            },
+            [&format!("{base}/submit"), &format!("{base}/query")],
+        );
+        let _ = std::fs::remove_file(wav_path);
+        assert_eq!(result.unwrap(), "recovered");
+        done.send(()).unwrap();
+        server.join().unwrap();
+    }
 
     #[test]
     fn silent_audio_maps_to_no_speech() {
