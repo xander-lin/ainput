@@ -96,6 +96,7 @@ test('rust-unit',
   timeout: 300)
 if meson.can_run_host_binaries()
   test('delivery-order', executable('delivery-queue-test', 'shell/delivery_queue_test.cpp'))
+  test('status-text', executable('status-text-test', 'shell/status_test.cpp'))
   test('terminal-error-delivery', executable('output-handler-test',
     ['shell/output_handler_test.cpp', 'shell/output_handler.cpp'],
     dependencies: [fcitx5_core]),

@@ -171,7 +171,9 @@ fn fallback_bytes() -> [u8; 16] {
 
 fn classify_status(code: &str) -> Option<Category> {
     match code {
-        STATUS_SILENT => Some(Category::NoSpeech),
+        // The service processed the audio and found none: an empty result,
+        // not a local gate (which is the only source of `NoSpeech`).
+        STATUS_SILENT => Some(Category::EmptyResult),
         "45000001" | "45000002" | "45000151" => Some(Category::InvalidRequest),
         "45000131" => Some(Category::ServiceUnavailable),
         "45000132" => Some(Category::InvalidRequest),
@@ -480,8 +482,8 @@ mod tests {
     }
 
     #[test]
-    fn silent_audio_maps_to_no_speech() {
-        assert_eq!(classify_status("20000003"), Some(Category::NoSpeech));
+    fn silent_audio_is_an_empty_result() {
+        assert_eq!(classify_status("20000003"), Some(Category::EmptyResult));
     }
 
     #[test]

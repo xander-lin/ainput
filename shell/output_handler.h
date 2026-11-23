@@ -34,6 +34,8 @@ enum class Stage {
 /// is gone, the drop is logged without recording the text.
 class OutputHandler {
 public:
+    /// Called once for every failure, independently of what the input panel
+    /// happens to show at that moment.
     using ReportError = std::function<void(const std::string &)>;
 
     OutputHandler(fcitx::Instance *instance, ReportError reportError);
@@ -47,6 +49,10 @@ public:
 
     void submit(uint64_t recognitionId, const std::string &text);
     void fail(uint64_t recognitionId, const std::string &text);
+    /// Terminal outcome that is not a failure: the recording had nothing to
+    /// transcribe. It releases the delivery slot like an error, but is never
+    /// passed to ReportError, so it does not become a desktop notification.
+    void noResult(uint64_t recognitionId, const std::string &text);
     void showStatus(uint64_t recognitionId, const std::string &text);
     void showStage(uint64_t recognitionId, Stage stage);
 
@@ -64,7 +70,8 @@ private:
     int wakePipe_[2] = {-1, -1};
     std::unique_ptr<fcitx::EventSourceIO> wakeWatcher_;
 
-    enum class Kind { Status, Text, Error };
+    /// `NoResult` is terminal like `Error` but is not reported as one.
+    enum class Kind { Status, Text, Error, NoResult };
     struct Pending {
         std::string text;
         Kind kind;

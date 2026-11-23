@@ -243,10 +243,18 @@ fn extract_text(body: &Value) -> Option<String> {
         .map(str::to_string)
 }
 
+/// DashScope answers "the audio contains no recognizable words" with HTTP 400
+/// and this message. The request was valid and the audio was processed, so it
+/// is an empty result rather than a rejected request.
+const NO_WORDS: &str = "asr_response_have_no_words";
+
 fn classify(status: u64, code: &str, message: &str) -> crate::error::Category {
     use crate::error::Category;
     let code = code.to_ascii_lowercase();
     let message_lower = message.to_ascii_lowercase();
+    if code.contains(NO_WORDS) || message_lower.contains(NO_WORDS) {
+        return Category::EmptyResult;
+    }
     let looks_model = code.contains("model")
         || message_lower.contains("model not found")
         || message_lower.contains("model not exist")
@@ -421,6 +429,102 @@ mod tests {
     fn rate_limit_is_service_unavailable() {
         use crate::error::Category;
         assert_eq!(classify(429, "", ""), Category::ServiceUnavailable);
+    }
+
+    #[test]
+    fn no_words_is_an_empty_result_not_a_rejected_request() {
+        use crate::error::Category;
+        // The exact reply seen in the input panel as a raw HTTP error.
+        assert_eq!(
+            classify(400, "CLIENT_ERROR", "ASR_RESPONSE_HAVE_NO_WORDS"),
+            Category::EmptyResult
+        );
+        // Any other 400 is still a rejected request.
+        assert_eq!(
+            classify(400, "InvalidParameter", "bad parameter"),
+            Category::InvalidRequest
+        );
+    }
+
+    /// Goes through `transcribe_with` against a local server, so the JSON
+    /// fields and the status handling are covered, not only `classify`.
+    #[test]
+    fn no_words_reply_reaches_the_caller_as_an_empty_result() {
+        use crate::http::tests::read_request;
+        use crate::network::MockNetwork;
+        use std::io::Write;
+        use std::net::TcpListener;
+        use std::sync::atomic::AtomicBool;
+        use std::sync::Arc;
+
+        let home = std::env::temp_dir().join("ainput-qwen-no-words");
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).unwrap();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let endpoint = format!("http://{}/v1", listener.local_addr().unwrap());
+        std::fs::write(
+            home.join("qwen.json"),
+            format!(r#"{{"api_key":"sk-x","endpoint":"{endpoint}","timeout_sec":5}}"#),
+        )
+        .unwrap();
+        let lock = crate::config::test_lock();
+        let previous = crate::config::test_config_dir(home.clone());
+
+        let server = std::thread::spawn(move || {
+            listener
+                .set_nonblocking(true)
+                .expect("nonblocking listener");
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            loop {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        let request = read_request(&mut stream);
+                        assert!(request.starts_with("POST /v1 "));
+                        let body = r#"{"code":"CLIENT_ERROR","message":"ASR_RESPONSE_HAVE_NO_WORDS","request_id":"x"}"#;
+                        write!(
+                            stream,
+                            "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+                            body.len()
+                        )
+                        .unwrap();
+                        return;
+                    }
+                    Err(_) if std::time::Instant::now() < deadline => {
+                        std::thread::sleep(std::time::Duration::from_millis(5));
+                    }
+                    Err(_) => panic!("the request never reached the local server"),
+                }
+            }
+        });
+
+        let wav_path =
+            std::env::temp_dir().join(format!("ainput-qwen-no-words-{}.wav", std::process::id()));
+        crate::wav::write(&wav_path, &[1; 1600]).unwrap();
+        let client = crate::http::Transport::new(Arc::new(MockNetwork::default()));
+        let result = Qwen.transcribe_with(
+            &Input {
+                wav_path: &wav_path,
+                cancel: &Arc::new(AtomicBool::new(false)),
+                credentials: &Credentials::default(),
+            },
+            crate::asr::Context {
+                id: 0,
+                client: &client,
+                deadline: None,
+            },
+        );
+        let _ = std::fs::remove_file(wav_path);
+        // A panic in the server thread surfaces here instead of hanging.
+        server.join().unwrap();
+
+        crate::config::restore_config_dir(previous);
+        drop(lock);
+        let _ = std::fs::remove_dir_all(&home);
+
+        let error = result.expect_err("an empty transcript is not Ok");
+        assert_eq!(error.category, crate::error::Category::EmptyResult);
+        assert!(error.detail.contains("ASR_RESPONSE_HAVE_NO_WORDS"));
     }
 
     #[test]

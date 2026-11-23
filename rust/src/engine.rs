@@ -113,7 +113,7 @@ impl Shared {
                         self.callbacks.text(id, &text);
                     }
                     Err(error) => {
-                        crate::diagnostic::trace(id, error.category.as_str());
+                        crate::diagnostic::trace_failure(id, &error);
                         self.callbacks.error(id, &error);
                     }
                 }

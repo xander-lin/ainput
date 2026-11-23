@@ -73,6 +73,14 @@ void OutputHandler::fail(uint64_t recognitionId, const std::string &text) {
     }
 }
 
+void OutputHandler::noResult(uint64_t recognitionId, const std::string &text) {
+    if (recognitionId == 0) {
+        showGlobalStatus(text);
+    } else {
+        enqueue({text, Kind::NoResult, recognitionId});
+    }
+}
+
 void OutputHandler::showStatus(uint64_t recognitionId, const std::string &text) {
     enqueue({text, Kind::Status, recognitionId});
 }
@@ -157,6 +165,14 @@ void OutputHandler::commitPending(const Results::Entry &entry) {
         reportError_(pending.text);
         if (!targets_.hasNewer(entry.id, entry.context)) showStatusNow(entry.context, pending.text);
         FCITX_INFO() << "Ainput: id=" << entry.id << " stage=error_reported";
+        return;
+    }
+    if (pending.kind == Kind::NoResult) {
+        // Not a failure, so no notification: the panel carries it, and a
+        // newer dictation in the same context legitimately takes the panel
+        // over. The journal still has the reason.
+        if (!targets_.hasNewer(entry.id, entry.context)) showStatusNow(entry.context, pending.text);
+        FCITX_INFO() << "Ainput: id=" << entry.id << " stage=no_result";
         return;
     }
     auto *ic = instance_->inputContextManager().findByUUID(entry.context);

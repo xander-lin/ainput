@@ -17,7 +17,12 @@ pub enum Category {
     Network = 6,
     ServiceUnavailable = 7,
     Timeout = 8,
+    /// The local speech gate rejected the recording: nothing was sent to a
+    /// backend. Only `capture` produces this category, never a provider.
     NoSpeech = 9,
+    /// The backend processed the audio and returned no text. Nothing to
+    /// transcribe, but not a failure either. Includes the vendor "no words"
+    /// and "silent audio" replies, whatever HTTP status they arrive with.
     EmptyResult = 10,
     AudioData = 11,
     Runtime = 12,

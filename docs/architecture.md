@@ -59,8 +59,11 @@ CapsLock release
   -> on_text / on_error → OutputHandler → in-order delivery per input context
 ```
 
-Failed dictations also send a desktop notification so a subsequent dictation
-cannot erase the error by updating the input panel.
+A failed dictation also sends a desktop notification, so a subsequent
+dictation cannot erase the error by updating the input panel. Two outcomes
+are not failures and stay in the panel only: the local speech gate rejecting
+a recording, and the backend returning no text. Apart from these, desktop
+notifications are used only by the provider and denoiser switch.
 
 `Ctrl+CapsLock` enters switch mode without recording. `←/→` or `h/l` change the
 backend, `↑/↓` or `k/j` change the denoiser. Both are written to
@@ -115,6 +118,15 @@ pub struct Input<'a> {
   `LocalSetup`, `Network`, `ServiceUnavailable`, `Timeout`, `NoSpeech`,
   `EmptyResult`, `AudioData`, `Runtime`, `ConfigInvalid`, `InvalidRequest`,
   `Unknown`) which the shell turns into one actionable sentence.
+- The category says where "nothing was transcribed" was decided. `NoSpeech`
+  is produced only by the local speech gate in `capture`: the recording was
+  never sent. A backend that processed the audio and found nothing returns
+  `EmptyResult`, whatever status the vendor used for it (Qwen answers HTTP
+  400 `ASR_RESPONSE_HAVE_NO_WORDS`, Doubao status `20000003`). Providers
+  never return `NoSpeech`.
+- The core writes the category and its own description to the journal before
+  reporting an error, so the shell may replace the description with a
+  sentence of its own without losing the raw cause.
 
 ### Backends
 
@@ -154,6 +166,9 @@ reported to the user. There is no third option.
 | Missing API key / model file | panel shows the exact file to edit |
 | Denoise helper missing | recording is **discarded** with a setup error, not sent undenoised |
 | Microphone unavailable | `Ainput: microphone ...` immediately, not an empty result |
+| Local speech gate rejects the recording | panel only: `no speech detected locally; audio was not sent` |
+| Backend processed the audio, no text | panel only: `no speech recognized by the ASR backend` |
+| Backend unreachable or too slow | panel and notification: `ASR backend did not respond (...)` |
 | Input context gone before commit | result is discarded and the recording ID is logged |
 | `/dev/uinput` unavailable | one warning naming the udev rule; voice input still works |
 | Queue full | `recognition queue full; try again`, newest recording discarded |

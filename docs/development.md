@@ -39,6 +39,7 @@ rust/            core: capture, DSP, ASR, config, uinput, diagnostics
   src/ffi/       hand-written FFI to libebur128, speexdsp, libsoxr
 shell/           C++: AddonInstance, AinputConfig, key events, output handler
   ainput_core.h  the entire C ABI between the two halves
+  status.h       the panel sentence for each error category
 docs/            configuration, architecture, development, history
 udev/            /dev/uinput rule
 ```
@@ -52,8 +53,8 @@ with enum values copied from the headers.
 ## Tests
 
 ```bash
-meson test -C build          # Rust unit tests, no hardware
-cd rust && cargo test        # same thing directly
+meson test -C build          # Rust unit tests and three C++ tests, no hardware
+cd rust && cargo test        # the Rust tests directly
 cargo test --lib -- --ignored   # records from the real microphone
 ```
 
@@ -61,11 +62,18 @@ The ignored test is the end-to-end check: it starts the engine, records 1.5 s,
 stops, and requires a callback (text or error) within 15 s. Run it after
 touching capture, the queue, or the callback plumbing.
 
+Meson also builds three C++ tests when the target can run executables:
+`delivery-order` (per-context FIFO), `status-text` (one panel sentence per
+error category, and which outcomes are not failures) and
+`terminal-error-delivery`, which embeds a real fcitx5 event loop and checks
+that a failure is reported even when a later success is delivered in the same
+callback, while an outcome with nothing to transcribe reaches the panel only.
+
 Unit coverage by area:
 
 | Area | What is asserted |
 |------|------------------|
-| `asr::qwen` | base64 vectors, legacy/new format selection, text extraction paths, HTTP status → category, request body shape |
+| `asr::qwen` | base64 vectors, legacy/new format selection, text extraction paths, HTTP status → category, the vendor's no-words reply through the real request path, request body shape |
 | `asr::doubao` | status-code mapping, result extraction, request id uniqueness |
 | `asr::sherpa` | CLI argument contract, JSON text extraction, empty-result handling |
 | `asr::mod` | registry order, every descriptor creates a provider |
@@ -76,7 +84,7 @@ Unit coverage by area:
 | `engine` | queue limit, provider selection, cancellation, deadline recovery, final WAV validation and real microphone callback (ignored) |
 | `uinput` | ioctl numbers are derived, not hard-coded |
 | `http` | header lookup, replacing connections on transport failure or network change |
-| `diagnostic` | hash stability, civil-date conversion |
+| `diagnostic` | hash stability, civil-date conversion, failure details folded onto one bounded line |
 
 Tests that touch files set `HOME` to a temporary directory. The old C++ suite
 had a bug where a test wrote into the real `~/.config`; see `found.md` #10, and
@@ -87,6 +95,10 @@ isolating `HOME`.
 
 The standard fcitx5 journal identifies each dictation by `id=` and `stage=`,
 from recording release through provider requests, deadline/error, and commit.
+A failure line also carries its category and the core's own description, for
+example `Ainput: id=7 stage=empty_result Qwen HTTP 400 CLIENT_ERROR:
+ASR_RESPONSE_HAVE_NO_WORDS`, so a friendlier panel sentence never hides the
+raw cause.
 
 A `-Ddiagnostic_logging=true` build appends one JSON object per line to
 `~/.local/share/ainput/diagnostic.log`. `AINPUT_DIAGNOSTIC_LOG` overrides the

@@ -34,6 +34,45 @@ pub fn trace(id: u64, stage: &str) {
     }
 }
 
+/// A dictation's failure for the fcitx5 journal: the category plus the core's
+/// own description, so a friendlier panel sentence never hides the raw cause
+/// (a vendor error code, a transport message, a file path). Still no request
+/// or speech data.
+pub fn trace_failure(id: u64, error: &crate::error::Error) {
+    let _ = writeln!(
+        std::io::stderr().lock(),
+        "Ainput: id={id} stage={} {}",
+        error.category.as_str(),
+        one_line(&error.detail, 200)
+    );
+    if enabled() {
+        event(
+            "engine",
+            error.category.as_str(),
+            &[("recognition_id", id.to_string())],
+        );
+    }
+}
+
+/// Folds line breaks onto one line and bounds the length at a character
+/// boundary, so one event is always one journal line.
+fn one_line(text: &str, limit: usize) -> String {
+    let mut out: String = text
+        .chars()
+        .map(|ch| {
+            if matches!(ch, '\n' | '\r' | '\t') {
+                ' '
+            } else {
+                ch
+            }
+        })
+        .collect();
+    if out.chars().count() > limit {
+        out = out.chars().take(limit).collect::<String>() + "…";
+    }
+    out
+}
+
 fn log_path() -> PathBuf {
     if let Ok(path) = std::env::var("AINPUT_DIAGNOSTIC_LOG") {
         if !path.is_empty() {
@@ -225,5 +264,16 @@ mod tests {
     fn civil_from_days_matches_known_dates() {
         assert_eq!(civil_from_days(0), (1970, 1, 1));
         assert_eq!(civil_from_days(19_000), (2022, 1, 8));
+    }
+
+    #[test]
+    fn failure_detail_is_one_bounded_line() {
+        // Every one of \n, \r and \t becomes exactly one space.
+        assert_eq!(one_line("a\nb\r\n\tc", 200), "a b   c");
+        // Cut after 200 whole characters, never inside a multi-byte one.
+        let long = "中".repeat(300);
+        let cut = one_line(&long, 200);
+        assert_eq!(cut.chars().count(), 201);
+        assert!(cut.chars().take(200).all(|ch| ch == '中'));
     }
 }

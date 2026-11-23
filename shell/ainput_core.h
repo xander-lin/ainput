@@ -27,7 +27,8 @@ typedef struct {
     void (*on_text)(void *user, uint64_t recognition_id, const char *text);
     // Failure. category is one of AINPUT_ERR_*; detail is a human description.
     // Status text ("listening", "processing") stays in the shell; the core
-    // only reports outcomes.
+    // only reports outcomes. The core logs category and detail to the
+    // journal, so the shell may replace the detail with its own sentence.
     void (*on_error)(void *user, uint64_t recognition_id, int32_t category,
                      const char *detail);
     // Optional, may be NULL. Fires when a queued recording starts being
@@ -70,7 +71,9 @@ enum {
     AINPUT_ERR_NETWORK = 6,
     AINPUT_ERR_SERVICE_UNAVAILABLE = 7,
     AINPUT_ERR_TIMEOUT = 8,
+    // Produced only by the local speech gate: nothing was sent to a backend.
     AINPUT_ERR_NO_SPEECH = 9,
+    // The backend processed the audio and returned no text.
     AINPUT_ERR_EMPTY_RESULT = 10,
     AINPUT_ERR_AUDIO_DATA = 11,
     AINPUT_ERR_RUNTIME = 12,

@@ -76,6 +76,13 @@ While recording, the input panel shows `listening...`; after release it moves
 through `processing audio...` and `recognizing...`, then the line disappears and
 either the text is inserted or an actionable error is shown.
 
+When nothing is transcribed, the panel says where that was decided:
+`no speech detected locally; audio was not sent` (the built-in speech gate
+rejected the recording), `no speech recognized by the ASR backend` (the audio
+was processed and contained no speech), or `ASR backend did not respond`
+(network error or timeout). These stay in the panel; only failures also raise
+a desktop notification.
+
 ## ASR backends
 
 | Provider | Where it runs | Needs |

@@ -45,6 +45,7 @@
 #include "ainput_core.h"
 #include "output_handler.h"
 #include "periodic.h"
+#include "status.h"
 
 using Clock = std::chrono::steady_clock;
 
@@ -267,53 +268,20 @@ private:
     }
 
     void onError(uint64_t id, int32_t category, const char *detail) {
-        output_->fail(id, statusForError(category, detail ? detail : ""));
+        const std::string status =
+            ainput::statusForError(category, detail ? detail : "");
+        // Nothing to transcribe is not a failure: it stays in the panel and
+        // never becomes a desktop notification.
+        if (ainput::isNoResult(category)) {
+            output_->noResult(id, status);
+        } else {
+            output_->fail(id, status);
+        }
     }
 
     void onStage(uint64_t id, int32_t stage) {
         if (stage == AINPUT_STAGE_RECOGNIZING) {
             output_->showStage(id, ainput::Stage::Recognizing);
-        }
-    }
-
-    static std::string statusForError(int32_t category, const std::string &detail) {
-        switch (category) {
-        case AINPUT_ERR_CONFIG_MISSING:
-            return "Ainput: " + detail;
-        case AINPUT_ERR_CONFIG_INVALID:
-            return "Ainput: " + detail;
-        case AINPUT_ERR_AUTH_REJECTED:
-            return "Ainput: API key rejected; check provider config";
-        case AINPUT_ERR_MODEL_NOT_FOUND:
-            return "Ainput: model not found; check provider config";
-        case AINPUT_ERR_LOCAL_SETUP:
-            return "Ainput: local engine setup error; " + detail;
-        case AINPUT_ERR_NETWORK:
-            return "Ainput: network error; try again";
-        case AINPUT_ERR_SERVICE_UNAVAILABLE:
-            return "Ainput: recognition service unavailable; try again";
-        case AINPUT_ERR_TIMEOUT:
-            return "Ainput: recognition timed out; try again";
-        case AINPUT_ERR_NO_SPEECH:
-        case AINPUT_ERR_EMPTY_RESULT:
-            return "Ainput: no speech recognized";
-        case AINPUT_ERR_AUDIO_DATA:
-            return "Ainput: " + detail;
-        case AINPUT_ERR_INVALID_REQUEST:
-        case AINPUT_ERR_RUNTIME:
-        case AINPUT_ERR_UNKNOWN:
-        default: {
-            std::string oneLine = detail;
-            for (char &ch : oneLine) {
-                if (ch == '\n' || ch == '\r' || ch == '\t') {
-                    ch = ' ';
-                }
-            }
-            if (oneLine.size() > 120) {
-                oneLine = oneLine.substr(0, 120) + "...";
-            }
-            return "Ainput: " + oneLine;
-        }
         }
     }
 

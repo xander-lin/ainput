@@ -900,7 +900,8 @@
   terminal errors, then logs `error_delivered` even if it skips the panel
   update. The drain also clears the panel during successful delivery.
 - **Correction.** Deliver each terminal error as a desktop notification
-  independently of the current recording's transient status.
+  independently of the current recording's transient status. Refined by #37:
+  an outcome that is not a failure stays in the panel.
 - **Prevention.** Test an error followed by a successful dictation in the
   same input context and assert that both final outcomes are observable.
   Initialize the embedded fcitx5 instance before focusing the test input
@@ -918,3 +919,55 @@
 - **Correction**: Gate C++ test targets with `meson.can_run_host_binaries()`.
 - **Prevention**: Build the release with both the native and aarch64 setups
   after adding a test executable. Check that native Meson still runs it.
+
+## 37. "No speech" hid where the decision was made, and raised a notification
+
+- **Mistake and context.** A user dictated into silence with the Qwen
+  backend. The input panel showed
+  `Ainput: Qwen HTTP 400 CLIENT_ERROR: ASR_RESPONSE_HAVE_NO_WORDS` and a
+  desktop notification appeared. Three defects produced that one message:
+  1. `qwen::classify` sent every HTTP 400 to `InvalidRequest`. DashScope
+     reports "the audio was processed and the result is empty" as HTTP 400
+     `CLIENT_ERROR: ASR_RESPONSE_HAVE_NO_WORDS`, so an expected outcome was
+     rendered as a rejected request with its raw text.
+  2. `NoSpeech` and `EmptyResult` both rendered as `no speech recognized`,
+     and Doubao's silent status `20000003` was filed under `NoSpeech`. The
+     panel could not tell a local gate rejection (audio never sent) from a
+     backend that processed the audio and found nothing.
+  3. #35 routed every terminal error through the desktop notification,
+     including "nothing to transcribe", which is not a failure.
+- **Root cause.** The category followed the vendor's transport status
+  instead of the meaning for the user, and one category covered two
+  different stages of the pipeline. The notification fix in #35 was written
+  for failures and never asked which terminal outcomes are not failures.
+- **Correction.** `NoSpeech` is produced only by the local speech gate.
+  Every backend answer without text, including Qwen's HTTP 400
+  `ASR_RESPONSE_HAVE_NO_WORDS` and Doubao `20000003`, is `EmptyResult`
+  (`shell/status.h`, `OutputHandler::noResult`). The panel says where the
+  decision was made; only failures are notified. The core now writes its
+  raw description to the journal before reporting an error.
+- **Prevention.**
+  - An error category names the stage that decided, not the wire status.
+    When a vendor reports an expected outcome with an error status, map
+    that code explicitly before the generic status fallthrough.
+  - Test each documented vendor "empty result" code through the real request
+    path against a local server, not only through the classifier.
+  - Before routing an outcome to the failure notification, ask whether the
+    user would call it a failure. Assert the routing in a test, not only
+    the sentence.
+
+## 38. The embedded fcitx5 event loop is run once per test process
+
+- **Mistake and context.** Extending `terminal-error-delivery` with a second
+  scenario called `eventLoop().exec()` again after the first run had exited.
+  It returned at once without draining the self-pipe, so the queued outcome
+  was never delivered and the new assertions failed; the log stopped after
+  the first commit.
+- **Root cause.** Not established. The observed behaviour is that the loop
+  dispatches nothing after `exit()` in that process. Whether the exit
+  request persists in sd-event or in the fcitx5 wrapper was not determined.
+- **Correction.** Queue every outcome before the single `exec()` and observe
+  the state between deliveries from `commitStringImpl`, which runs while the
+  batch is still being drained.
+- **Prevention.** One `exec()` per embedded instance. To assert a state
+  between two deliveries, hook the commit instead of re-running the loop.

@@ -118,6 +118,10 @@ WAV），固定发送，不可配置。旧格式（`qwen3-asr-flash` 系列）�
   `qwenExtractErrorDetail`），对新旧两种 schema 容错，单测见
   `tests/test_qwen_json.cpp`。
 - HTTP 非 200 时提取响应体中的 `code`/`message` 附加到错误信息。
+- 例外：HTTP 400 + `ASR_RESPONSE_HAVE_NO_WORDS`（官方释义：识别成功，但最终识别
+  结果为空）表示音频已处理、没有可识别的词，归为 `empty_result`。面板显示
+  “后端未识别到语音”，原始 `code`/`message` 进日志；其余 400 仍是
+  `invalid_request`。
 - 诊断日志 `request_started`/`request_result` 事件带 `model` 字段。
 - 流式（SSE）输出可作后续优化：长音频时 3.1 支持分句流式返回。
 

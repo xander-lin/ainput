@@ -81,6 +81,11 @@ who want fast push-to-talk dictation without leaving the keyboard.
 - Failures are never swallowed. Every failure either becomes an `Error` with a
   `Category` that the shell renders as one actionable sentence, or is reported
   to the user. Silently degrading (for example dropping denoising) is a bug.
+- Status text says where an outcome was decided. `NoSpeech` comes only from
+  the local speech gate (nothing was sent); a backend that processed the
+  audio and returned no text is `EmptyResult`, whatever HTTP status the
+  vendor used. Desktop notifications are for failures and for the provider /
+  denoiser switch only; "nothing to transcribe" stays in the input panel.
 - Documentation is one file per topic, not one file per phase of work:
   - `README.md` (English) / `README.zh-CN.md` (Chinese) — project introduction,
     install, usage, provider table, quick config. Keep engineering detail out;

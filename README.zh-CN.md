@@ -70,6 +70,12 @@ fcitx5 -r
 `recognizing...`，随后提示行消失，最后要么上屏文本，要么显示一条可操作的
 错误提示。
 
+没有文本上屏时，面板会指出是在哪一步决定的：`no speech detected locally;
+audio was not sent`（内置语音门限在本地拦截，录音没有发出）、`no speech
+recognized by the ASR backend`（后端处理了音频，但没有识别到语音）或
+`ASR backend did not respond`（网络错误或超时）。这些只显示在面板里；只有
+真正的失败才会另外弹出桌面通知。
+
 ## 识别后端
 
 | 后端 | 运行位置 | 需要 |
