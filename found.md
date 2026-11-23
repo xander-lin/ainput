@@ -906,3 +906,15 @@
   Initialize the embedded fcitx5 instance before focusing the test input
   context. Focusing it earlier aborts because the input-context property
   factory has not been registered. Use an isolated config directory.
+
+## 36. A test executable broke the aarch64 release build
+
+- **Mistake/context**: The native `OutputHandler` test was built by default
+  during the cross build and failed to link against fcitx5's transitive
+  dependencies in the release sysroot.
+- **Root cause**: Linking an executable requires more of the target runtime
+  dependency graph than linking the addon shared object. The cross build
+  has no executable wrapper to run the test.
+- **Correction**: Gate C++ test targets with `meson.can_run_host_binaries()`.
+- **Prevention**: Build the release with both the native and aarch64 setups
+  after adding a test executable. Check that native Meson still runs it.

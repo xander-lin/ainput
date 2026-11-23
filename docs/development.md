@@ -218,10 +218,11 @@ and `provides=(fcitx5-ainput)`. Only one can be installed.
    meson setup build --buildtype=release && ninja -C build
    tools/cross-aarch64.sh <aarch64-sysroot> <version>
    ```
-   The cross script needs a sysroot with the target's headers and link-time
-   `.so` stubs only — every dependency is linked dynamically, so the full
-   runtime dependency closure is *not* needed. It refuses to publish when the
-   aarch64 dependency list differs from the native one.
+   The cross script needs a sysroot with the target's headers, link-time `.so`
+   files, and pkg-config metadata, including libcurl's private pkg-config
+   requirements. It refuses to publish when the aarch64 dependency list
+   differs from the native one. Meson builds the C++ tests when the target
+   executables can run.
 3. Produce the artifacts and their checksums:
    ```bash
    tools/make-release.sh <version> x86_64

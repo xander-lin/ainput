@@ -1,5 +1,5 @@
 project('fcitx5-ainput', 'cpp',
-  version: '0.1.0',
+  version: '0.1.1',
   default_options: ['cpp_std=c++20', 'warning_level=3', 'werror=true'])
 
 # The implementation lives in two places:
@@ -94,9 +94,11 @@ test('rust-unit',
   find_program('rust/run-tests.sh'),
   args: [meson.project_source_root(), rust_features],
   timeout: 300)
-test('delivery-order', executable('delivery-queue-test', 'shell/delivery_queue_test.cpp'))
-test('terminal-error-delivery', executable('output-handler-test',
-  ['shell/output_handler_test.cpp', 'shell/output_handler.cpp'],
-  dependencies: [fcitx5_core]),
-  env: {'XDG_CONFIG_HOME': meson.current_build_dir() / 'test-config'},
-  timeout: 5)
+if meson.can_run_host_binaries()
+  test('delivery-order', executable('delivery-queue-test', 'shell/delivery_queue_test.cpp'))
+  test('terminal-error-delivery', executable('output-handler-test',
+    ['shell/output_handler_test.cpp', 'shell/output_handler.cpp'],
+    dependencies: [fcitx5_core]),
+    env: {'XDG_CONFIG_HOME': meson.current_build_dir() / 'test-config'},
+    timeout: 5)
+endif
