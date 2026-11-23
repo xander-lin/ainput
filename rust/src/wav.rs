@@ -1,8 +1,7 @@
 //! Minimal 16-bit PCM WAV reader/writer.
 //!
-//! The pipeline only ever produces mono 16 kHz signed 16-bit, and the vendor
-//! APIs are told exactly that, so the reader is deliberately narrow: it
-//! accepts the canonical 44-byte PCM header and rejects anything else loudly.
+//! Recognition uses 16 kHz and the DeepFilter helper uses 48 kHz. Both use
+//! the canonical 44-byte header for mono signed 16-bit PCM.
 
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
@@ -17,6 +16,10 @@ pub const BITS_PER_SAMPLE: u16 = 16;
 
 /// Writes `samples` as a canonical PCM WAV file.
 pub fn write(path: &Path, samples: &[i16]) -> Result<()> {
+    write_at_rate(path, samples, SAMPLE_RATE)
+}
+
+pub(crate) fn write_at_rate(path: &Path, samples: &[i16], rate: u32) -> Result<()> {
     let data_bytes = (samples.len() * 2) as u32;
     let mut header = [0u8; 44];
     header[0..4].copy_from_slice(b"RIFF");
@@ -26,8 +29,8 @@ pub fn write(path: &Path, samples: &[i16]) -> Result<()> {
     header[16..20].copy_from_slice(&16u32.to_le_bytes());
     header[20..22].copy_from_slice(&1u16.to_le_bytes()); // PCM
     header[22..24].copy_from_slice(&CHANNELS.to_le_bytes());
-    header[24..28].copy_from_slice(&SAMPLE_RATE.to_le_bytes());
-    header[28..32].copy_from_slice(&(SAMPLE_RATE * 2).to_le_bytes()); // byte rate
+    header[24..28].copy_from_slice(&rate.to_le_bytes());
+    header[28..32].copy_from_slice(&(rate * 2).to_le_bytes()); // byte rate
     header[32..34].copy_from_slice(&2u16.to_le_bytes()); // block align
     header[34..36].copy_from_slice(&BITS_PER_SAMPLE.to_le_bytes());
     header[36..40].copy_from_slice(b"data");
@@ -57,6 +60,10 @@ pub fn write(path: &Path, samples: &[i16]) -> Result<()> {
 
 /// Reads a canonical PCM WAV file produced by `write` or by the capture path.
 pub fn read(path: &Path) -> Result<Vec<i16>> {
+    read_at_rate(path, SAMPLE_RATE)
+}
+
+pub(crate) fn read_at_rate(path: &Path, expected_rate: u32) -> Result<Vec<i16>> {
     let mut file = File::open(path).map_err(|e| {
         Error::audio_data(format!("cannot open {}: {e}", path.display()))
     })?;
@@ -64,24 +71,36 @@ pub fn read(path: &Path) -> Result<Vec<i16>> {
     file.read_to_end(&mut bytes)
         .map_err(|e| Error::audio_data(format!("cannot read {}: {e}", path.display())))?;
 
-    if bytes.len() < 44 || &bytes[0..4] != b"RIFF" || &bytes[8..12] != b"WAVE" {
+    if bytes.len() < 44
+        || &bytes[0..4] != b"RIFF"
+        || &bytes[8..16] != b"WAVEfmt "
+        || &bytes[16..22] != b"\x10\0\0\0\x01\0"
+        || &bytes[36..40] != b"data"
+    {
         return Err(Error::audio_data(format!(
-            "{} is not a RIFF/WAVE file",
+            "{} does not have a canonical PCM WAV header",
             path.display()
         )));
     }
     let channels = u16::from_le_bytes([bytes[22], bytes[23]]);
     let rate = u32::from_le_bytes([bytes[24], bytes[25], bytes[26], bytes[27]]);
     let bits = u16::from_le_bytes([bytes[34], bytes[35]]);
-    if channels != CHANNELS || rate != SAMPLE_RATE || bits != BITS_PER_SAMPLE {
+    if channels != CHANNELS || rate != expected_rate || bits != BITS_PER_SAMPLE {
         return Err(Error::audio_data(format!(
-            "{} is {channels}ch/{rate}Hz/{bits}bit, expected mono 16 kHz 16-bit",
+            "{} is {channels}ch/{rate}Hz/{bits}bit, expected mono {expected_rate}Hz 16-bit",
             path.display()
         )));
     }
     let data = &bytes[44..];
+    let data_bytes = u32::from_le_bytes(bytes[40..44].try_into().unwrap()) as usize;
+    if data_bytes != data.len() || !data_bytes.is_multiple_of(2) {
+        return Err(Error::audio_data(format!(
+            "{} has an invalid PCM data length",
+            path.display()
+        )));
+    }
     Ok(data
-        .chunks(2)
+        .chunks_exact(2)
         .map(|pair| i16::from_le_bytes([pair[0], pair[1]]))
         .collect())
 }

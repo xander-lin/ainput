@@ -26,7 +26,8 @@ const char *stageText(Stage stage) {
 }
 } // namespace
 
-OutputHandler::OutputHandler(fcitx::Instance *instance) : instance_(instance) {
+OutputHandler::OutputHandler(fcitx::Instance *instance, ReportError reportError)
+    : instance_(instance), reportError_(std::move(reportError)) {
     if (pipe2(wakePipe_, O_NONBLOCK | O_CLOEXEC) != 0) {
         throw std::runtime_error("Ainput: OutputHandler pipe() failed");
     }
@@ -152,8 +153,10 @@ void OutputHandler::showStatusNow(const fcitx::ICUUID &uuid,
 void OutputHandler::commitPending(const Results::Entry &entry) {
     const auto &pending = *entry.outcome;
     if (pending.kind == Kind::Error) {
+        // A later commit can clear the panel in this same event-loop callback.
+        reportError_(pending.text);
         if (!targets_.hasNewer(entry.id, entry.context)) showStatusNow(entry.context, pending.text);
-        FCITX_INFO() << "Ainput: id=" << entry.id << " stage=error_delivered";
+        FCITX_INFO() << "Ainput: id=" << entry.id << " stage=error_reported";
         return;
     }
     auto *ic = instance_->inputContextManager().findByUUID(entry.context);

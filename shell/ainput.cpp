@@ -183,7 +183,9 @@ public:
         callbacks.on_stage = &AinputAddon::onStageThunk;
         engine_ = ainput_engine_new(&callbacks);
 
-        output_ = std::make_unique<ainput::OutputHandler>(instance_);
+        output_ = std::make_unique<ainput::OutputHandler>(instance_, [this](const std::string &error) {
+            notify(error);
+        });
 
         migrateLegacyConfig();
         pushSettings();

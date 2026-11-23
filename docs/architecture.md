@@ -59,6 +59,9 @@ CapsLock release
   -> on_text / on_error → OutputHandler → in-order delivery per input context
 ```
 
+Failed dictations also send a desktop notification so a subsequent dictation
+cannot erase the error by updating the input panel.
+
 `Ctrl+CapsLock` enters switch mode without recording. `←/→` or `h/l` change the
 backend, `↑/↓` or `k/j` change the denoiser. Both are written to
 `~/.config/fcitx5/conf/ainput.conf` and apply to the next recording.

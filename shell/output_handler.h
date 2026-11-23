@@ -5,6 +5,7 @@
 #include <fcitx-utils/event.h>
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -33,7 +34,9 @@ enum class Stage {
 /// is gone, the drop is logged without recording the text.
 class OutputHandler {
 public:
-    explicit OutputHandler(fcitx::Instance *instance);
+    using ReportError = std::function<void(const std::string &)>;
+
+    OutputHandler(fcitx::Instance *instance, ReportError reportError);
     ~OutputHandler();
 
     OutputHandler(const OutputHandler &) = delete;
@@ -56,6 +59,7 @@ public:
 
 private:
     fcitx::Instance *instance_;
+    ReportError reportError_;
 
     int wakePipe_[2] = {-1, -1};
     std::unique_ptr<fcitx::EventSourceIO> wakeWatcher_;

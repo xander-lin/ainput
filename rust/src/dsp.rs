@@ -13,7 +13,7 @@ use crate::settings::Denoise;
 
 pub const FRAME_SIZE: usize = 320; // 20 ms at 16 kHz
 const SAMPLES_PER_MS: usize = 16;
-const MIN_ACTIVE_SAMPLES: usize = 60 * SAMPLES_PER_MS;
+const MIN_ACTIVE_SAMPLES: usize = 250 * SAMPLES_PER_MS;
 const MIN_FRAME_RMS: f64 = 64.0; // about -54 dBFS
 
 /// EBU R128 normalization to `target_lufs`, returning the measured loudness.
@@ -380,6 +380,7 @@ pub fn denoise_deepfilter(samples: &mut Vec<i16>) -> Result<()> {
 }
 
 fn run_deepfilter(samples: &mut Vec<i16>, binary: PathBuf, cancel: &AtomicBool) -> Result<()> {
+    const FILTER_RATE: u32 = 48_000;
     if !binary.is_file() {
         return Err(Error::local_setup(format!(
             "deepfilter is enabled but {} does not exist",
@@ -406,13 +407,16 @@ fn run_deepfilter(samples: &mut Vec<i16>, binary: PathBuf, cancel: &AtomicBool) 
     }
     let work_dir = WorkDir(work_dir);
     let input_48k = work_dir.0.join("input_48k.wav");
-    let output_48k = work_dir.0.join("input_48k_df.wav");
+    // The upstream helper writes the input basename to its output directory.
+    let output_dir = work_dir.0.join("out");
+    std::fs::create_dir(&output_dir)
+        .map_err(|error| Error::audio_data(format!("cannot stage DeepFilter output: {error}")))?;
 
-    let resampled = resample(samples, 16_000, 48_000)?;
-    crate::wav::write(&input_48k, &resampled)?;
+    let resampled = resample(samples, crate::wav::SAMPLE_RATE, FILTER_RATE)?;
+    crate::wav::write_at_rate(&input_48k, &resampled, FILTER_RATE)?;
 
     let mut command = std::process::Command::new(&binary);
-    command.arg("-D").arg("-o").arg(&work_dir.0).arg(&input_48k);
+    command.arg("-D").arg("-o").arg(&output_dir).arg(&input_48k);
     let status = crate::process::run(
         &mut command,
         &binary.display().to_string(),
@@ -426,13 +430,17 @@ fn run_deepfilter(samples: &mut Vec<i16>, binary: PathBuf, cancel: &AtomicBool) 
         )));
     }
 
-    let filtered = crate::wav::read(&output_48k).and_then(|filtered| {
-        if filtered.is_empty() {
-            return Err(Error::audio_data("deepfilter produced an empty WAV"));
-        }
-        resample(&filtered, 48_000, 16_000)
-    })?;
-    *samples = filtered;
+    let output_48k = output_dir.join("input_48k.wav");
+    let output_48k = if output_48k.is_file() {
+        output_48k
+    } else {
+        output_dir.join("input_48k_df.wav")
+    };
+    let filtered = crate::wav::read_at_rate(&output_48k, FILTER_RATE)?;
+    if filtered.is_empty() {
+        return Err(Error::audio_data("deepfilter produced an empty WAV"));
+    }
+    *samples = resample(&filtered, FILTER_RATE, crate::wav::SAMPLE_RATE)?;
     Ok(())
 }
 
@@ -500,12 +508,14 @@ fn preprocess_with_denoiser(
             voice: false,
         });
     }
+    let input_is_constant = samples.iter().all(|&sample| sample == samples[0]);
     let (loudness, gain) = normalize_with_gain(samples, lufs_target)?;
     check_cancel(cancel)?;
     denoise(samples)?;
     check_cancel(cancel)?;
     let activity = measure_activity(samples, cancel)?;
-    let voice = detect_voice(samples, &activity, crest_threshold, cancel)?;
+    // A flat capture can only develop variation through processing artifacts.
+    let voice = !input_is_constant && detect_voice(samples, &activity, crest_threshold, cancel)?;
     if voice {
         trim_silence_cancellable(samples, cancel)?;
     }
@@ -567,20 +577,29 @@ mod tests {
     fn sustained_burst_passes_crest_and_vad_gate() {
         // A voiced burst amid silence gives enough active frames and a high crest factor.
         let mut samples = vec![0i16; 16_000];
-        let burst = tone(20_000.0, 3200);
-        samples[3200..6400].copy_from_slice(&burst);
+        let burst = tone(20_000.0, 4160);
+        samples[3200..3200 + burst.len()].copy_from_slice(&burst);
         assert!(has_voice(&samples, 2.4).unwrap());
     }
 
     #[test]
     fn zero_crest_threshold_still_requires_sustained_audio_variation() {
-        assert!(has_voice(&tone(3000.0, 1600), 0.0).unwrap());
+        // A partial final frame contributes only the samples it contains.
+        assert!(has_voice(&tone(3000.0, 4000), 0.0).unwrap());
+        assert!(!has_voice(&tone(3000.0, 3999), 0.0).unwrap());
+        let mut sparse = tone(3000.0, 3840);
+        sparse.resize(16_000, 0);
+        assert!(!has_voice(&sparse, 0.0).unwrap());
         assert!(!has_voice(&tone(3.0, 16_000), 0.0).unwrap());
-        assert!(!has_voice(&[0; 1600], 0.0).unwrap());
-        assert!(!has_voice(&[3000; 1600], 0.0).unwrap());
-        let mut click = [0; 1600];
-        click[320] = 30_000;
-        assert!(!has_voice(&click, 0.0).unwrap());
+        assert!(!has_voice(&[0; 4800], 0.0).unwrap());
+        assert!(!has_voice(&[3000; 4800], 0.0).unwrap());
+        let mut clicks = vec![0; 16_000];
+        for index in [160, 3360, 6560] {
+            clicks[index] = 20_000;
+        }
+        let gated = preprocess(&mut clicks, Denoise::Speexdsp, -16.0, -15, 0.0).unwrap();
+        assert!(!gated.voice);
+        assert!(gated.active_ms() < 250);
     }
 
     #[test]
@@ -593,10 +612,10 @@ mod tests {
 
     #[test]
     fn very_quiet_and_short_audio_is_amplified_before_the_gate() {
-        for len in [1600, 16_000] {
+        for (len, expected_voice) in [(1600, false), (4800, true), (16_000, true)] {
             let mut samples = tone(3.0, len);
             let gated = preprocess(&mut samples, Denoise::Speexdsp, -16.0, -15, 0.0).unwrap();
-            assert!(gated.voice);
+            assert_eq!(gated.voice, expected_voice, "samples={len}");
             assert!(gated.gain > 20.0);
             assert!(samples.iter().any(|&s| i32::from(s).abs() > 100));
         }
@@ -613,7 +632,7 @@ mod tests {
         assert_eq!(gated.input_peak, 0);
         assert!(!gated.voice);
 
-        for input in [vec![1; 1600], tone(3.0, 1600)] {
+        for input in [vec![1; 4800], tone(3.0, 4800)] {
             let mut samples = input.clone();
             let gated = preprocess_with_denoiser(&mut samples, -16.0, 0.0, &cancel, |samples| {
                 assert!(samples.iter().any(|&s| s > 100));
@@ -638,6 +657,11 @@ mod tests {
                 assert_eq!(gated.gain, 1000.0);
                 assert!(!gated.voice, "{denoise:?}: {} ms", gated.active_ms());
             }
+        }
+        for level in [100, 1000, i16::MAX] {
+            let mut samples = vec![level; 16_000];
+            let gated = preprocess(&mut samples, Denoise::Speexdsp, -16.0, -15, 0.0).unwrap();
+            assert!(!gated.voice, "DC level {level}: {} ms", gated.active_ms());
         }
     }
 
@@ -789,6 +813,7 @@ mod tests {
         std::fs::write(
             &helper,
             r##"#!/bin/sh
+set -eu
 root=$(dirname "$0")
 touch "$root/ready-$$"
 i=0
@@ -797,7 +822,12 @@ while [ "$(find "$root" -name 'ready-*' | wc -l)" -lt 3 ]; do
     [ "$i" -lt 150 ] || exit 1
     sleep 0.02
 done
-cp "$4" "$3/input_48k_df.wav"
+# Canonical 48 kHz mono PCM with 12,000 samples. Write an independent
+# header using the upstream output basename and verify the staged input.
+out="$3/input_48k.wav"
+printf 'RIFF\344\135\000\000WAVEfmt \020\000\000\000\001\000\001\000\200\273\000\000\000\167\001\000\002\000\020\000data\300\135\000\000' > "$out"
+head -c 44 "$4" | cmp - "$out"
+dd if="$4" bs=44 skip=1 status=none >> "$out"
 "##,
         )
         .unwrap();

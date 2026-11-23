@@ -117,12 +117,15 @@ For audio below the R128 measurement gate or shorter than its 400 ms window,
 normalization falls back to RMS. Gain is capped at 1000x and limited by the
 input peak to avoid clipping. Low-level background noise is amplified too.
 The captured samples enter normalization as recorded. After denoising, each
-20 ms frame is scored by RMS variation around its mean. At least 60 ms of
+20 ms frame is scored by RMS variation around its mean. At least 250 ms of
 frames must meet the 64-count RMS floor (about −54 dBFS). Setting
 `CrestThreshold=0` skips the additional crest and VAD checks. In this mode,
 sustained noise can still pass the activity check. The normal journal logs
 input and output peak, measured loudness, gain, peak frame RMS, active time,
 gate result and denoiser. These entries contain no audio.
+An exactly constant capture cannot contain audio activity. It still runs
+through normalization and denoising, but artifacts from that processing do
+not qualify it for recognition.
 
 Trimming runs last so the denoiser can use leading noise to build a profile.
 Active frames and a varying partial final frame are kept even when trimming

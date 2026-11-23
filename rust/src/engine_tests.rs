@@ -174,7 +174,7 @@ fn only_recordings_with_a_remaining_signal_reach_recognition() {
         ..Settings::default()
     };
 
-    let quiet: Vec<i16> = (0..1600)
+    let quiet: Vec<i16> = (0..4800)
         .map(|i| {
             let phase = std::f64::consts::TAU * 440.0 * f64::from(i) / 16_000.0;
             (3.0 * phase.sin()) as i16
@@ -182,7 +182,8 @@ fn only_recordings_with_a_remaining_signal_reach_recognition() {
         .collect();
     for (samples, expected_error) in [
         (vec![0; 1600], Some(Category::AudioData)),
-        (vec![1; 1600], Some(Category::NoSpeech)),
+        (vec![1; 4800], Some(Category::NoSpeech)),
+        (quiet[..3840].to_vec(), Some(Category::NoSpeech)),
         (quiet, None),
     ] {
         let id = engine.start_with_capture(move |id, settings, _, cancel| {

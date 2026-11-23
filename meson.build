@@ -95,3 +95,8 @@ test('rust-unit',
   args: [meson.project_source_root(), rust_features],
   timeout: 300)
 test('delivery-order', executable('delivery-queue-test', 'shell/delivery_queue_test.cpp'))
+test('terminal-error-delivery', executable('output-handler-test',
+  ['shell/output_handler_test.cpp', 'shell/output_handler.cpp'],
+  dependencies: [fcitx5_core]),
+  env: {'XDG_CONFIG_HOME': meson.current_build_dir() / 'test-config'},
+  timeout: 5)

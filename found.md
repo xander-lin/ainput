@@ -843,3 +843,66 @@
   and with signal at the end of a longer clip. Assert the output retains the
   signal and that all-zero output never reaches recognition. Validate the WAV
   written by capture in the hardware test and require successful delivery.
+
+## 32. A synthetic tone was mistaken for evidence of missed speech
+
+- **Mistake and context.** The review classified a synthetic tone rejected
+  after SpeexDSP as a speech false negative. The tone added a constant DC
+  offset to a weak sine wave and contained no speech.
+- **Root cause.** The experiment measured changes in normalization gain and
+  post-denoise activity. The review inferred a speech outcome from that
+  measurement without testing a recording that contained speech.
+- **Correction.** Withdraw the finding. The activity check correctly rejected
+  the tone because its remaining variation was below the floor after denoising.
+- **Prevention.** Use recordings of actual speech to establish a speech false
+  negative. Use synthetic tones to measure signal processing behavior.
+
+## 33. The review expected the activity gate to classify speech
+
+- **Mistake and context.** The review treated synthetic transients passing
+  with `CrestThreshold=0` as a defect. A constant input produced 220 ms of
+  qualifying variation after real SpeexDSP. Three isolated clicks produced
+  60 ms of qualifying frames with or without SpeexDSP.
+- **Root cause.** The review applied a speech classification requirement to
+  the minimum activity check. A transient can raise a frame's RMS above the
+  floor, and the check counts the frame by design.
+- **Correction.** Withdraw the finding. In this mode, send audio to ASR when
+  enough of the denoised signal meets the variation and level floor. If noise
+  suppression leaves too little signal, return `no_speech` locally.
+  The minimum is now 250 ms, which rejects the reproduced clicks. Stronger
+  constant inputs still passed at 250 ms. An exactly constant raw waveform
+  cannot carry speech, so denoising artifacts alone cannot qualify it.
+- **Prevention.** Verify both outcomes against the activity check's contract.
+  Prefer real recordings when evaluating how often speech or noise is rejected.
+
+## 34. The DeepFilter fixture accepted a mismatched WAV sample rate
+
+- **Mistake and context.** Staging one second of audio for DeepFilter wrote
+  48,000 PCM samples in a WAV whose header advertised 16 kHz. `ffprobe`
+  reported a three-second clip. The mismatch also exists in `origin/master`.
+- **Root cause.** The shared WAV writer and reader are fixed at 16 kHz, but
+  the DeepFilter caller resamples the samples to 48 kHz and later assumes
+  48 kHz output. The concurrent helper fixture copies the input back and
+  therefore accepts the same incorrect header on both sides.
+- **Correction.** Write and validate a 48 kHz WAV around the helper, then
+  resample back to 16 kHz for recognition. Use a separate output directory
+  so the upstream helper can write its output under the input basename.
+- **Prevention.** Check rate and duration at the helper boundary. Have the
+  fixture validate its input and write an independently formatted output.
+
+## 35. Ordered delivery can hide a terminal error
+
+- **Mistake and context.** When a recording fails while another recording
+  for the same input context is outstanding, the status panel can omit the
+  failed recording's error. If both outcomes are drained together, a later
+  success can clear the error in the same event-loop callback.
+- **Root cause.** `OutputHandler` applies the newer-job status guard to
+  terminal errors, then logs `error_delivered` even if it skips the panel
+  update. The drain also clears the panel during successful delivery.
+- **Correction.** Deliver each terminal error as a desktop notification
+  independently of the current recording's transient status.
+- **Prevention.** Test an error followed by a successful dictation in the
+  same input context and assert that both final outcomes are observable.
+  Initialize the embedded fcitx5 instance before focusing the test input
+  context. Focusing it earlier aborts because the input-context property
+  factory has not been registered. Use an isolated config directory.
