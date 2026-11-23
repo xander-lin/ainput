@@ -49,7 +49,7 @@ CapsLock press
   -> activation timer (ActivationMsec)
   -> on fire: engine.start() reserves a queue slot, spawns a capture thread,
      the shell records the current input-context UUID, panel shows "listening..."
-  -> capture thread: PulseAudio → normalize → speech gate → denoise → trim → WAV
+  -> capture thread: PulseAudio → zero check → normalize → denoise → speech gate → trim → WAV
 
 CapsLock release
   -> panel shows "processing audio...", engine.stop() signals the thread,

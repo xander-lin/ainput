@@ -255,6 +255,15 @@ pub fn run(
             "microphone stream failed while recording",
         ));
     }
+    finish_recording(recognition_id, settings, samples, cancel)
+}
+
+pub(crate) fn finish_recording(
+    recognition_id: u64,
+    settings: Settings,
+    mut samples: Vec<i16>,
+    cancel: &AtomicBool,
+) -> Result<Captured> {
     if samples.is_empty() {
         return Err(Error::audio_data("no audio captured"));
     }
@@ -267,12 +276,23 @@ pub fn run(
         settings.crest_threshold,
         cancel,
     )?;
+    let output_peak = samples.iter().map(|&s| (s as i32).abs()).max().unwrap_or(0);
+    eprintln!(
+        "Ainput: id={recognition_id} audio input_peak={} output_peak={output_peak} loudness_lufs={:.1} gain={:.2} peak_frame_rms={:.1} active_ms={} crest_threshold={} voice={} denoise={}",
+        gated.input_peak, gated.loudness, gated.gain, gated.peak_frame_rms(), gated.active_ms(),
+        settings.crest_threshold, gated.voice, settings.denoise.as_str()
+    );
 
+    if gated.input_peak == 0 {
+        return Err(Error::audio_data(
+            "microphone returned only zero samples; check the input source and mute",
+        ));
+    }
     if !gated.voice {
         return Err(Error::new(Category::NoSpeech, "no speech detected"));
     }
 
-    if cancelled() {
+    if cancel.load(Ordering::Acquire) {
         return Err(Error::timeout("cancelled"));
     }
     let wav_path = wav_path_for(recognition_id);

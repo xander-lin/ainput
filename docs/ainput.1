@@ -153,8 +153,10 @@ Recorded audio goes through:
 .RS
 .nf
 PulseAudio capture
+  \(-> reject empty or all-zero capture
   \(-> ebur128 loudness normalization (-16 LUFS)
   \(-> denoising (speexdsp or deepfilter; only when enabled)
+  \(-> post-denoise activity check and optional crest/VAD gate
   \(-> VAD-based silence trimming
   \(-> WAV output
   \(-> ASR recognition

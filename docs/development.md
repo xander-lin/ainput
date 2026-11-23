@@ -71,9 +71,9 @@ Unit coverage by area:
 | `asr::mod` | registry order, every descriptor creates a provider |
 | `config` | comment stripping (offset preserving), schema suggestions, type and required checks, tilde expansion |
 | `templates` | every template parses, passes its schema, and lists every field |
-| `dsp` | gate behaviour on tones vs impulses, normalization, resampling length, trimming |
+| `dsp` | post-denoise activity, quiet recordings, SpeexDSP delay and error handling, concurrent denoisers, resampling, trimming |
 | `wav` | round trip, rejection of non-WAV input |
-| `engine` | queue limit, provider selection, cancellation, deadline recovery, real microphone callback (ignored) |
+| `engine` | queue limit, provider selection, cancellation, deadline recovery, final WAV validation and real microphone callback (ignored) |
 | `uinput` | ioctl numbers are derived, not hard-coded |
 | `http` | header lookup, replacing connections on transport failure or network change |
 | `diagnostic` | hash stability, civil-date conversion |
@@ -108,13 +108,26 @@ Useful events: `engine/settings_applied`, `audio/capture_started`,
 ## Audio pipeline
 
 ```text
-PulseAudio -> ebur128 norm (-16 LUFS) -> speech gate (crest + speexdsp VAD)
-           -> denoise (only when enabled) -> silence trim -> WAV
+PulseAudio -> reject empty or all-zero capture -> normalize (-16 LUFS)
+           -> optional denoise -> activity check -> optional crest + VAD
+           -> silence trim -> WAV
 ```
 
-Order matters: the denoiser needs the leading noise to build a profile, which
-is why trimming runs last. A steady tone is rejected by the crest gate by
-design — speech has sharper peaks than a sine wave.
+For audio below the R128 measurement gate or shorter than its 400 ms window,
+normalization falls back to RMS. Gain is capped at 1000x and limited by the
+input peak to avoid clipping. Low-level background noise is amplified too.
+The captured samples enter normalization as recorded. After denoising, each
+20 ms frame is scored by RMS variation around its mean. At least 60 ms of
+frames must meet the 64-count RMS floor (about −54 dBFS). Setting
+`CrestThreshold=0` skips the additional crest and VAD checks. In this mode,
+sustained noise can still pass the activity check. The normal journal logs
+input and output peak, measured loudness, gain, peak frame RMS, active time,
+gate result and denoiser. These entries contain no audio.
+
+Trimming runs last so the denoiser can use leading noise to build a profile.
+Active frames and a varying partial final frame are kept even when trimming
+VAD misses them. The SpeexDSP denoiser flushes one frame of internal delay
+and keeps the original sample count.
 
 ## Configuration options
 

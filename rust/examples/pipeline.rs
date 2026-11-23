@@ -38,9 +38,7 @@ fn signal(seconds: f64) -> Vec<i16> {
                 }
                 let phase = offset as f64 / rate;
                 let envelope = (-12.0 * phase).exp();
-                let value = (2.0 * std::f64::consts::PI * 220.0 * phase).sin()
-                    * envelope
-                    * 24000.0;
+                let value = (2.0 * std::f64::consts::PI * 220.0 * phase).sin() * envelope * 24000.0;
                 out.push(value as i16);
             }
             index += (0.18 * rate) as usize + (0.09 * rate) as usize;
@@ -81,24 +79,23 @@ fn main() {
 
         let (normalize, _) = time_it(20, || {
             let mut samples = base.clone();
-            ainput_core::dsp::normalize(&mut samples, -16.0)
+            ainput_core::dsp::normalize(&mut samples, -16.0).unwrap()
         });
 
-        let (gate, gate_passed) =
-            time_it(20, || ainput_core::dsp::has_voice(&base, 2.4));
+        let (gate, gate_passed) = time_it(20, || ainput_core::dsp::has_voice(&base, 2.4).unwrap());
         if !gate_passed {
             eprintln!("WARNING: gate rejected the benchmark signal at {seconds}s");
         }
 
         let (speex, _) = time_it(20, || {
             let mut samples = base.clone();
-            ainput_core::dsp::denoise_speexdsp(&mut samples, -15);
+            ainput_core::dsp::denoise_speexdsp(&mut samples, -15).unwrap();
             samples
         });
 
         let (trim, _) = time_it(20, || {
             let mut samples = base.clone();
-            ainput_core::dsp::trim_silence(&mut samples);
+            ainput_core::dsp::trim_silence(&mut samples).unwrap();
             samples.len()
         });
 
@@ -122,9 +119,15 @@ fn main() {
 
         let (full, _) = time_it(20, || {
             let mut samples = base.clone();
-            ainput_core::dsp::preprocess(&mut samples, ainput_core::settings::Denoise::Speexdsp, -16.0, -15, 2.4)
-                .map(|g| g.voice)
-                .unwrap_or(false)
+            ainput_core::dsp::preprocess(
+                &mut samples,
+                ainput_core::settings::Denoise::Speexdsp,
+                -16.0,
+                -15,
+                2.4,
+            )
+            .map(|g| g.voice)
+            .unwrap_or(false)
         });
 
         let (b64, _) = time_it(20, || {

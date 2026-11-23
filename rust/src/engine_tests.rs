@@ -142,7 +142,64 @@ fn settings_are_clamped() {
     engine.shutdown();
 }
 
-/// End-to-end check against the real microphone and PulseAudio.
+fn validate_captured_wav(captured: capture::Captured) -> Result<capture::Captured, Error> {
+    let result = crate::wav::read(&captured.wav_path).and_then(|samples| {
+        if crate::dsp::has_voice(&samples, 0.0)? {
+            Ok(())
+        } else {
+            Err(Error::runtime("WAV has insufficient signal"))
+        }
+    });
+    match result {
+        Ok(()) => Ok(captured),
+        Err(error) => {
+            drop(Cleanup(&captured.wav_path));
+            Err(Error::runtime(format!("invalid captured WAV: {error}")))
+        }
+    }
+}
+
+#[test]
+fn only_recordings_with_a_remaining_signal_reach_recognition() {
+    use crate::error::Category;
+    use crate::settings::Denoise;
+
+    let (events, rx) = mpsc::channel();
+    let engine = observed_engine(&events);
+    // Use the per-engine snapshot without writing the global display credentials.
+    *engine.settings.write().unwrap() = Settings {
+        provider: "mock".into(),
+        crest_threshold: 0.0,
+        denoise: Denoise::Speexdsp,
+        ..Settings::default()
+    };
+
+    let quiet: Vec<i16> = (0..1600)
+        .map(|i| {
+            let phase = std::f64::consts::TAU * 440.0 * f64::from(i) / 16_000.0;
+            (3.0 * phase.sin()) as i16
+        })
+        .collect();
+    for (samples, expected_error) in [
+        (vec![0; 1600], Some(Category::AudioData)),
+        (vec![1; 1600], Some(Category::NoSpeech)),
+        (quiet, None),
+    ] {
+        let id = engine.start_with_capture(move |id, settings, _, cancel| {
+            validate_captured_wav(capture::finish_recording(id, settings, samples, cancel)?)
+        });
+        assert_ne!(id, 0);
+        engine.stop(id);
+        let expected = match expected_error {
+            Some(category) => Event::Error(id, category.as_i32()),
+            None => Event::Text(id),
+        };
+        assert_eq!(rx.recv_timeout(Duration::from_secs(2)).unwrap(), expected);
+    }
+}
+
+/// End-to-end check against the real microphone and PulseAudio. Provide sound
+/// at the selected capture source during the 1.5-second recording.
 ///
 /// Ignored by default because it needs audio hardware. Run with:
 ///   cargo test --lib -- --ignored --nocapture
@@ -195,12 +252,14 @@ fn records_and_reports_through_callbacks() {
 
     let mut settings = Settings::default();
     settings.provider = "mock".to_string();
-    // Make the gate permissive so a quiet room still reaches the provider.
+    // Exercise the activity check without the optional crest and VAD gate.
     settings.crest_threshold = 0.0;
-    settings.denoise = crate::settings::Denoise::None;
+    settings.denoise = crate::settings::Denoise::Speexdsp;
     engine.set_settings(settings);
 
-    let id = engine.start();
+    let id = engine.start_with_capture(|id, settings, stop, cancel| {
+        validate_captured_wav(capture::run(id, settings, stop, cancel)?)
+    });
     assert_ne!(id, 0, "recording did not start");
 
     std::thread::sleep(Duration::from_millis(1500));
@@ -210,12 +269,9 @@ fn records_and_reports_through_callbacks() {
         .recv_timeout(Duration::from_secs(15))
         .expect("no callback within 15 s");
     println!("callback: {message}");
-    assert!(
-        message.starts_with("text:") || message.starts_with("error:"),
-        "unexpected callback: {message}"
-    );
+    assert_eq!(message, format!("text:{id}:hello world"));
 
-    // The queue must drain even when the recording produced no speech.
+    // The queue must drain after the recording is delivered.
     let deadline = std::time::Instant::now() + Duration::from_secs(5);
     while engine.pending() != 0 && std::time::Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(20));

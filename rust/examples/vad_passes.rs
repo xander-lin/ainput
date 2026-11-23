@@ -53,7 +53,7 @@ fn main() {
         let mut gate = Vec::new();
         for _ in 0..runs {
             let started = Instant::now();
-            ainput_core::dsp::has_voice(&base, 2.4);
+            ainput_core::dsp::has_voice(&base, 2.4).unwrap();
             gate.push(started.elapsed().as_secs_f64() * 1000.0);
         }
 
@@ -61,7 +61,7 @@ fn main() {
         for _ in 0..runs {
             let mut samples = base.clone();
             let started = Instant::now();
-            ainput_core::dsp::trim_silence(&mut samples);
+            ainput_core::dsp::trim_silence(&mut samples).unwrap();
             trim.push(started.elapsed().as_secs_f64() * 1000.0);
         }
 

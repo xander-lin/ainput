@@ -140,7 +140,7 @@ FCITX_CONFIGURATION(
     // because the marshaller leaves the default in place when the key is
     // absent from the file.
     fcitx::HiddenOption<double, fcitx::NoConstrain<double>, fcitx::DoubleMarshaller> crestThreshold{
-        this, "CrestThreshold", "Speech gate; 0 disables", 2.4};
+        this, "CrestThreshold", "Optional crest and VAD gate (0 skips both checks)", 2.4};
 
     // ---- credentials and model ids ----
     // These override the values in ~/.config/ainput/<provider>.json. An empty

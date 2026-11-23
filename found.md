@@ -771,3 +771,75 @@
 - **Prevention**: In the connection recovery test, keep the old upload working
   while the new request opens a new connection, and ensure the old connection
   is not returned to the current pool.
+
+## 28. SpeexDSP initialization failure silently skips enabled denoising
+
+- **Mistake/context**: A review of concurrent dictations found that
+  `denoise_speexdsp` returns normally when `speex_preprocess_state_init` returns
+  null. The caller can then send the original audio to recognition despite
+  denoising being enabled. No occurrence in a real session was established.
+- **Root cause**: The SpeexDSP denoiser returns `()` rather than a failure and
+  ignores the return values from its configuration calls. Concurrent resource
+  pressure could expose an initialization failure, but is not required.
+- **Correction**: Propagate initialization and control errors through the
+  preprocessing pipeline instead of submitting undenoised audio. Each native
+  state is owned and destroyed by its job.
+- **Prevention**: Inject initialization and control failures in tests and assert
+  that recognition is not called. Also test overlapping jobs with the real
+  SpeexDSP backend and a controlled DeepFilter helper, including cancellation
+  and independent output files.
+
+## 29. Disabling the speech gate left VAD enabled on quiet recordings
+
+- **Mistake/context**: A user with a quiet microphone reported repeated
+  no-speech errors. Their `CrestThreshold=0` was documented as disabling the
+  speech gate, but only disabled the crest comparison; VAD still rejected audio.
+  Journal entries confirmed these jobs failed before recognition. The exact
+  waveform and which local gate rejected each past recording are unavailable.
+- **Root cause**: The implementation and tests treated zero as disabling only
+  crest checking, whereas the user-facing configuration promised the whole
+  speech gate was disabled. Normalization also capped gain at 20x and did
+  nothing when R128 could not measure a very quiet or short recording.
+- **Correction**: Normalize the captured waveform before denoising, with
+  bounded, peak-limited gain and an RMS fallback when R128 cannot measure.
+  Reject digital silence before DSP and measure sustained RMS variation after
+  denoising. A zero threshold skips the optional crest and VAD checks while
+  retaining the activity check. Log peak, gain and activity per job.
+- **Prevention**: Exercise the documented disabled-gate behavior, digital
+  silence, very quiet and sub-400 ms signals through preprocessing. Check
+  normalization gain and clipping bounds. Include a DC-only signal: a flat
+  one-count offset was amplified 1000x and passed the disabled gate even
+  though it contained no varying signal. Real microphones still need separate
+  end-to-end verification because synthetic signals are not speech.
+
+## 30. Silence trimming discarded the beginning of early speech
+
+- **Mistake/context**: The trim code claimed to preserve 200 ms of headroom but
+  forced the trim offset to at least 3200 samples. Speech beginning immediately
+  could therefore lose its first 200 ms.
+- **Root cause**: A minimum retained headroom was applied as a minimum amount to
+  discard. The existing test only checked that some padding was removed.
+- **Correction**: Subtract the 200 ms headroom from the detected start with
+  saturation at zero. Keep active frames even when trimming VAD misses them,
+  and preserve a varying partial final frame.
+- **Prevention**: Validate retained content at both clip boundaries, not only
+  that a trimmed clip is shorter. The review found that the trimmer still
+  ignores partial final frames. A 3199-sample continuous tone previously left
+  intact by the early return is now cut to 2880 samples. Include a non-aligned
+  clip in the end-boundary check and preserve its unclassified remainder.
+
+## 31. Unflushed SpeexDSP output can mask a silent recognition input
+
+- **Mistake/context**: The low-volume review found a 6 ms tone passing the
+  disabled gate but yielding all-zero samples after SpeexDSP. In a longer
+  clip with a tone in its final 20 ms, the processed peak was 84. Feeding one
+  extra zero frame revealed the delayed tone at a peak of 2978.
+- **Root cause**: Frame processing stops when the input ends, without
+  flushing the delayed output. The capture path uses the pre-denoise gate
+  result to decide whether to submit the resulting audio.
+- **Correction**: Flush the denoiser's delayed frame, align the output with
+  the input and retain the sample count. Check signal activity after denoising.
+- **Prevention**: Exercise the entire preprocessing chain with a short clip
+  and with signal at the end of a longer clip. Assert the output retains the
+  signal and that all-zero output never reaches recognition. Validate the WAV
+  written by capture in the hardware test and require successful delivery.

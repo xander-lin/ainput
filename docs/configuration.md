@@ -36,7 +36,7 @@ should be asked to make:
 | `BufferMs` | `20` | Microphone fragment size (6–1000 ms). Raise only if the end of a phrase is cut off | *file only* |
 | `LufsTarget` | `-16.0` | Loudness normalization target in LUFS | *file only* |
 | `SpeexLevel` | `-15` | speexdsp suppression strength in dB | *file only* |
-| `CrestThreshold` | `2.4` | Speech gate; `0` disables it | *file only* |
+| `CrestThreshold` | `2.4` | Optional crest and VAD checks after denoising. `0` skips both checks. All recordings still need enough variation and level after processing. | *file only* |
 
 fcitx5 only writes options that differ from their default, so the file stays
 short. Missing options mean "default".

@@ -1,7 +1,7 @@
 //! Where the time actually goes for one dictation.
 //!
 //! Splits a recognition into the stages the user waits through:
-//!   preprocess (normalize/gate/denoise/trim)  -> on the capture thread
+//!   preprocess (normalize/denoise/gate/trim)  -> on the capture thread
 //!   encode (wav read + base64 + JSON)         -> worker
 //!   network (submit/HTTP)                     -> worker
 //!   parse                                     -> worker

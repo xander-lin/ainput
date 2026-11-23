@@ -1,9 +1,5 @@
-//! Audio preprocessing: loudness normalization, speech gating, denoise,
-//! silence trimming and resampling.
-//!
-//! Order matters and matches the C++ pipeline: normalize -> gate -> denoise ->
-//! trim. The denoiser needs the leading noise to build a profile, which is why
-//! trimming happens last.
+//! Audio preprocessing: normalize and denoise the captured waveform, then
+//! check the remaining signal for speech and trim the quiet edges.
 
 use std::os::unix::fs::DirBuilderExt;
 use std::path::PathBuf;
@@ -16,225 +12,266 @@ use crate::ffi::dsp;
 use crate::settings::Denoise;
 
 pub const FRAME_SIZE: usize = 320; // 20 ms at 16 kHz
+const SAMPLES_PER_MS: usize = 16;
+const MIN_ACTIVE_SAMPLES: usize = 60 * SAMPLES_PER_MS;
+const MIN_FRAME_RMS: f64 = 64.0; // about -54 dBFS
 
 /// EBU R128 normalization to `target_lufs`, returning the measured loudness.
-pub fn normalize(samples: &mut [i16], target_lufs: f64) -> f64 {
+pub fn normalize(samples: &mut [i16], target_lufs: f64) -> Result<f64> {
+    Ok(normalize_with_gain(samples, target_lufs)?.0)
+}
+
+fn normalize_with_gain(samples: &mut [i16], target_lufs: f64) -> Result<(f64, f64)> {
     if samples.is_empty() {
-        return -70.0;
+        return Ok((f64::NEG_INFINITY, 1.0));
     }
     let state = unsafe { dsp::ebur128_init(1, 16_000, dsp::EBUR128_MODE_I) };
     if state.is_null() {
-        return -70.0;
+        return Err(Error::audio_data(
+            "cannot initialize loudness normalization",
+        ));
     }
     let mut loudness = 0.0f64;
-    unsafe {
-        dsp::ebur128_add_frames_short(state, samples.as_ptr(), samples.len());
-        dsp::ebur128_loudness_global(state, &mut loudness);
+    let (add_status, measure_status) = unsafe {
+        let add = dsp::ebur128_add_frames_short(state, samples.as_ptr(), samples.len());
+        let measure = dsp::ebur128_loudness_global(state, &mut loudness);
         let mut owned = state;
         dsp::ebur128_destroy(&mut owned);
+        (add, measure)
+    };
+    if add_status != 0 || measure_status != 0 {
+        return Err(Error::audio_data(format!(
+            "loudness measurement failed (add={add_status}, measure={measure_status})"
+        )));
     }
 
-    if loudness < -70.0 || !loudness.is_finite() {
-        return loudness;
+    let mut sum_sq = 0.0;
+    let mut peak = 0.0f64;
+    for &sample in samples.iter() {
+        let value = sample as f64;
+        sum_sq += value * value;
+        peak = peak.max(value.abs());
     }
+    if peak == 0.0 {
+        return Ok((loudness, 1.0));
+    }
+    // Integrated R128 is gated below -70 LUFS and needs a 400 ms window.
+    // Use RMS for those clips, retaining a bounded gain and peak headroom.
+    let reference = if loudness.is_finite() {
+        loudness
+    } else {
+        20.0 * ((sum_sq / samples.len() as f64).sqrt() / 32768.0).log10()
+    };
     let gain = 10f64
-        .powf((target_lufs - loudness) / 20.0)
-        .clamp(0.05, 20.0);
+        .powf((target_lufs - reference) / 20.0)
+        .clamp(0.05, 1000.0)
+        .min(32767.0 / peak);
     for sample in samples.iter_mut() {
         let scaled = (*sample as f64 * gain).clamp(-32768.0, 32767.0);
         *sample = scaled as i16;
     }
-    loudness
+    Ok((loudness, gain))
 }
 
-/// Speech gate: crest factor, then a speexdsp VAD majority vote.
-pub fn has_voice(samples: &[i16], crest_threshold: f64) -> bool {
-    if samples.is_empty() {
-        return false;
+fn check_cancel(cancel: &AtomicBool) -> Result<()> {
+    if cancel.load(Ordering::Acquire) {
+        return Err(Error::timeout("cancelled"));
     }
-    let mut peak: i32 = 0;
-    let mut sum_sq = 0f64;
-    for sample in samples {
-        let value = *sample as f64;
-        sum_sq += value * value;
-        let abs = (*sample as i32).abs();
-        if abs > peak {
-            peak = abs;
+    Ok(())
+}
+
+fn frame_rms(frame: &[i16]) -> f64 {
+    let (sum, sum_sq) = frame.iter().fold((0, 0), |(sum, sum_sq), &sample| {
+        let value = i64::from(sample);
+        (sum + value, sum_sq + value * value)
+    });
+    let count = frame.len() as i64;
+    // Measure variation around the frame mean, leaving the waveform intact.
+    ((count * sum_sq - sum * sum) as f64).sqrt() / count as f64
+}
+
+#[derive(Default)]
+struct Activity {
+    active_samples: usize,
+    peak_rms: f64,
+}
+
+fn measure_activity(samples: &[i16], cancel: &AtomicBool) -> Result<Activity> {
+    let mut activity = Activity::default();
+    for frame in samples.chunks(FRAME_SIZE) {
+        check_cancel(cancel)?;
+        let rms = frame_rms(frame);
+        activity.peak_rms = activity.peak_rms.max(rms);
+        if rms >= MIN_FRAME_RMS {
+            activity.active_samples += frame.len();
         }
     }
+    Ok(activity)
+}
+
+/// Speech detection on normalized, denoised samples.
+pub fn has_voice(samples: &[i16], crest_threshold: f64) -> Result<bool> {
+    let cancel = AtomicBool::new(false);
+    let activity = measure_activity(samples, &cancel)?;
+    detect_voice(samples, &activity, crest_threshold, &cancel)
+}
+
+fn detect_voice(
+    samples: &[i16],
+    activity: &Activity,
+    crest_threshold: f64,
+    cancel: &AtomicBool,
+) -> Result<bool> {
+    if activity.active_samples < MIN_ACTIVE_SAMPLES {
+        return Ok(false);
+    }
+    if crest_threshold <= 0.0 {
+        return Ok(true);
+    }
+
+    let (peak, sum_sq) = samples
+        .iter()
+        .fold((0.0f64, 0.0), |(peak, sum_sq), &sample| {
+            let value = f64::from(sample);
+            (peak.max(value.abs()), sum_sq + value * value)
+        });
     let rms = (sum_sq / samples.len() as f64).sqrt();
-    let crest = peak as f64 / if rms > 0.0 { rms } else { 1.0 };
-    if crest < crest_threshold {
-        return false;
+    if peak < crest_threshold * rms {
+        return Ok(false);
     }
 
-    const MIN_VOICE_RATIO: f64 = 0.15;
-    const MIN_VOICE_FRAMES: usize = 5;
-
-    let state = unsafe { dsp::speex_preprocess_state_init(FRAME_SIZE as i32, 16_000) };
-    if state.is_null() {
-        return true; // crest passed; do not drop audio because VAD is unavailable
+    let mut vad = NativeSpeex::vad(90, 70)?;
+    let mut voice_frames = 0;
+    for frame in samples.chunks(FRAME_SIZE) {
+        check_cancel(cancel)?;
+        voice_frames += usize::from(vad.classify(frame));
     }
-    let mut enable: i32 = 1;
-    let mut prob_start: i32 = 90;
-    let mut prob_continue: i32 = 70;
-    unsafe {
-        dsp::speex_preprocess_ctl(
-            state,
-            dsp::SPEEX_PREPROCESS_SET_VAD,
-            &mut enable as *mut i32 as *mut _,
-        );
-        dsp::speex_preprocess_ctl(
-            state,
-            dsp::SPEEX_PREPROCESS_SET_PROB_START,
-            &mut prob_start as *mut i32 as *mut _,
-        );
-        dsp::speex_preprocess_ctl(
-            state,
-            dsp::SPEEX_PREPROCESS_SET_PROB_CONTINUE,
-            &mut prob_continue as *mut i32 as *mut _,
-        );
-    }
-
-    let frame_count = samples.len() / FRAME_SIZE;
-    let mut voice_frames = 0usize;
-    let mut frame = vec![0i16; FRAME_SIZE];
-    for index in 0..frame_count {
-        frame.copy_from_slice(&samples[index * FRAME_SIZE..(index + 1) * FRAME_SIZE]);
-        if unsafe { dsp::speex_preprocess_run(state, frame.as_mut_ptr()) } != 0 {
-            voice_frames += 1;
-        }
-    }
-    let mut remainder = samples.len() % FRAME_SIZE;
-    if remainder > 0 {
-        let tail = &samples[samples.len() - remainder..];
-        frame[..remainder].copy_from_slice(tail);
-        for slot in frame.iter_mut().skip(remainder) {
-            *slot = 0;
-        }
-        if unsafe { dsp::speex_preprocess_run(state, frame.as_mut_ptr()) } != 0 {
-            voice_frames += 1;
-        }
-        remainder = 0;
-    }
-    let _ = remainder;
-    unsafe { dsp::speex_preprocess_state_destroy(state) };
-
-    let total = frame_count + usize::from(!samples.len().is_multiple_of(FRAME_SIZE));
-    if total == 0 {
-        return voice_frames >= MIN_VOICE_FRAMES;
-    }
-    voice_frames >= MIN_VOICE_FRAMES && (voice_frames as f64 / total as f64) >= MIN_VOICE_RATIO
+    let total = samples.len().div_ceil(FRAME_SIZE);
+    Ok(voice_frames >= 5 && voice_frames as f64 >= 0.15 * total as f64)
 }
 
-/// Removes leading and trailing non-speech frames, keeping one frame of pad
-/// and at least 200 ms of head so the first syllable is never clipped.
-pub fn trim_silence(samples: &mut Vec<i16>) {
-    const PAD_FRAMES: usize = 1;
-    const MIN_HEAD_SAMPLES: usize = 3200;
+/// Removes quiet edges, keeping 200 ms of headroom and one frame of tailroom.
+pub fn trim_silence(samples: &mut Vec<i16>) -> Result<()> {
+    trim_silence_cancellable(samples, &AtomicBool::new(false))
+}
 
-    let state = unsafe { dsp::speex_preprocess_state_init(FRAME_SIZE as i32, 16_000) };
-    if state.is_null() {
-        return;
-    }
-    let mut enable: i32 = 1;
-    let mut prob_start: i32 = 80;
-    let mut prob_continue: i32 = 50;
-    unsafe {
-        dsp::speex_preprocess_ctl(
-            state,
-            dsp::SPEEX_PREPROCESS_SET_VAD,
-            &mut enable as *mut i32 as *mut _,
-        );
-        dsp::speex_preprocess_ctl(
-            state,
-            dsp::SPEEX_PREPROCESS_SET_PROB_START,
-            &mut prob_start as *mut i32 as *mut _,
-        );
-        dsp::speex_preprocess_ctl(
-            state,
-            dsp::SPEEX_PREPROCESS_SET_PROB_CONTINUE,
-            &mut prob_continue as *mut i32 as *mut _,
-        );
-    }
-
-    let frame_count = samples.len() / FRAME_SIZE;
-    let mut voice = vec![false; frame_count];
-    let mut frame = vec![0i16; FRAME_SIZE];
-    for index in 0..frame_count {
-        frame.copy_from_slice(&samples[index * FRAME_SIZE..(index + 1) * FRAME_SIZE]);
-        voice[index] = unsafe { dsp::speex_preprocess_run(state, frame.as_mut_ptr()) } != 0;
-    }
-    unsafe { dsp::speex_preprocess_state_destroy(state) };
-
-    // Converging scan: the two edges meet in the middle instead of walking the
-    // whole array twice. Trivial next to the VAD itself, but it is the only
-    // part of the trimmer that is pure Rust.
-    let (first, last) = {
-        let mut first = 0usize;
-        let mut last = frame_count;
-        while first < last && !voice[first] {
-            first += 1;
+fn trim_silence_cancellable(samples: &mut Vec<i16>, cancel: &AtomicBool) -> Result<()> {
+    const HEAD_SAMPLES: usize = 200 * SAMPLES_PER_MS;
+    let mut vad = NativeSpeex::vad(80, 50)?;
+    let mut first = None;
+    let mut end = 0;
+    for (index, frame) in samples.chunks(FRAME_SIZE).enumerate() {
+        check_cancel(cancel)?;
+        let start = index * FRAME_SIZE;
+        // Keep active samples even when VAD misses them. A partial final
+        // frame has fewer observations, so also retain it when it varies.
+        if vad.classify(frame)
+            || frame_rms(frame) >= MIN_FRAME_RMS
+            || (frame.len() < FRAME_SIZE && frame.iter().any(|&s| s != frame[0]))
+        {
+            first.get_or_insert(start);
+            end = start + frame.len();
         }
-        while last > first && !voice[last - 1] {
-            last -= 1;
-        }
-        (first, last)
-    };
-    if first >= last {
-        return;
     }
-    let first = first.saturating_sub(PAD_FRAMES);
-    let last = (last + PAD_FRAMES).min(frame_count);
+    if let Some(start) = first {
+        samples.truncate((end + FRAME_SIZE).min(samples.len()));
+        samples.drain(..start.saturating_sub(HEAD_SAMPLES + FRAME_SIZE));
+    }
+    Ok(())
+}
 
-    let mut start = first * FRAME_SIZE;
-    let end = last * FRAME_SIZE;
-    if start < MIN_HEAD_SAMPLES {
-        start = MIN_HEAD_SAMPLES;
+trait SpeexDenoiser {
+    fn configure(&mut self, request: i32, value: i32) -> Result<()>;
+    fn process(&mut self, frame: &mut [i16; FRAME_SIZE]) -> bool;
+}
+
+struct NativeSpeex(*mut dsp::SpeexPreprocessState);
+
+impl NativeSpeex {
+    fn new() -> Result<Self> {
+        let state = unsafe { dsp::speex_preprocess_state_init(FRAME_SIZE as i32, 16_000) };
+        if state.is_null() {
+            Err(Error::audio_data("cannot initialize SpeexDSP preprocessor"))
+        } else {
+            Ok(Self(state))
+        }
     }
-    if start > end || start >= samples.len() {
-        return;
+
+    fn vad(start: i32, continue_: i32) -> Result<Self> {
+        let mut state = Self::new()?;
+        state.configure(dsp::SPEEX_PREPROCESS_SET_VAD, 1)?;
+        state.configure(dsp::SPEEX_PREPROCESS_SET_PROB_START, start)?;
+        state.configure(dsp::SPEEX_PREPROCESS_SET_PROB_CONTINUE, continue_)?;
+        Ok(state)
     }
-    samples.truncate(end);
-    samples.drain(..start);
+
+    fn classify(&mut self, samples: &[i16]) -> bool {
+        let mut frame = [0i16; FRAME_SIZE];
+        frame[..samples.len()].copy_from_slice(samples);
+        self.process(&mut frame)
+    }
+}
+
+impl SpeexDenoiser for NativeSpeex {
+    fn configure(&mut self, request: i32, mut value: i32) -> Result<()> {
+        let status =
+            unsafe { dsp::speex_preprocess_ctl(self.0, request, &mut value as *mut i32 as *mut _) };
+        if status != 0 {
+            return Err(Error::audio_data(format!(
+                "cannot configure SpeexDSP preprocessor (option {request}, error {status})"
+            )));
+        }
+        Ok(())
+    }
+
+    fn process(&mut self, frame: &mut [i16; FRAME_SIZE]) -> bool {
+        // SpeexDSP returns the VAD decision, even though it also updates the audio.
+        (unsafe { dsp::speex_preprocess_run(self.0, frame.as_mut_ptr()) }) != 0
+    }
+}
+
+impl Drop for NativeSpeex {
+    fn drop(&mut self) {
+        unsafe { dsp::speex_preprocess_state_destroy(self.0) };
+    }
 }
 
 /// Speexdsp spectral subtraction with the configured suppression level.
-pub fn denoise_speexdsp(samples: &mut [i16], level_db: i32) {
-    let state = unsafe { dsp::speex_preprocess_state_init(FRAME_SIZE as i32, 16_000) };
-    if state.is_null() {
-        return;
-    }
-    let mut enable: i32 = 1;
-    let mut level = level_db;
-    unsafe {
-        dsp::speex_preprocess_ctl(
-            state,
-            dsp::SPEEX_PREPROCESS_SET_DENOISE,
-            &mut enable as *mut i32 as *mut _,
-        );
-        dsp::speex_preprocess_ctl(
-            state,
-            dsp::SPEEX_PREPROCESS_SET_NOISE_SUPPRESS,
-            &mut level as *mut i32 as *mut _,
-        );
-    }
+pub fn denoise_speexdsp(samples: &mut [i16], level_db: i32) -> Result<()> {
+    denoise_speexdsp_with(samples, level_db, &AtomicBool::new(false), NativeSpeex::new)
+}
 
-    let frame_count = samples.len() / FRAME_SIZE;
-    for index in 0..frame_count {
-        unsafe {
-            dsp::speex_preprocess_run(state, samples[index * FRAME_SIZE..].as_mut_ptr());
+fn denoise_speexdsp_with<S: SpeexDenoiser>(
+    samples: &mut [i16],
+    level_db: i32,
+    cancel: &AtomicBool,
+    create: impl FnOnce() -> Result<S>,
+) -> Result<()> {
+    check_cancel(cancel)?;
+    let mut state = create()?;
+    state.configure(dsp::SPEEX_PREPROCESS_SET_DENOISE, 1)?;
+    state.configure(dsp::SPEEX_PREPROCESS_SET_NOISE_SUPPRESS, level_db)?;
+
+    // SpeexDSP's overlap-add output trails the input by one frame. Write
+    // each output to the preceding chunk, then flush the final chunk.
+    let mut previous: Option<&mut [i16]> = None;
+    let mut frame = [0i16; FRAME_SIZE];
+    for input in samples.chunks_mut(FRAME_SIZE) {
+        check_cancel(cancel)?;
+        frame.fill(0);
+        frame[..input.len()].copy_from_slice(input);
+        state.process(&mut frame);
+        if let Some(output) = previous.replace(input) {
+            output.copy_from_slice(&frame[..output.len()]);
         }
     }
-    let remainder = samples.len() % FRAME_SIZE;
-    if remainder > 0 {
-        let tail_start = samples.len() - remainder;
-        let mut pad = vec![0i16; FRAME_SIZE];
-        pad[..remainder].copy_from_slice(&samples[tail_start..]);
-        unsafe { dsp::speex_preprocess_run(state, pad.as_mut_ptr()) };
-        samples[tail_start..].copy_from_slice(&pad[..remainder]);
+    if let Some(output) = previous {
+        check_cancel(cancel)?;
+        frame.fill(0);
+        state.process(&mut frame);
+        output.copy_from_slice(&frame[..output.len()]);
     }
-    unsafe { dsp::speex_preprocess_state_destroy(state) };
+    Ok(())
 }
 
 /// Resamples mono i16 audio between two rates using libsoxr.
@@ -426,22 +463,77 @@ pub(crate) fn preprocess_cancellable(
     crest_threshold: f64,
     cancel: &AtomicBool,
 ) -> Result<Gated> {
-    let loudness = normalize(samples, lufs_target);
-    let voice = has_voice(samples, crest_threshold);
-    if voice {
-        match denoise {
-            Denoise::None => {}
-            Denoise::Speexdsp => denoise_speexdsp(samples, speex_level),
-            Denoise::DeepFilter => run_deepfilter(samples, deep_filter_binary(), cancel)?,
-        }
-        trim_silence(samples);
+    preprocess_with_denoiser(
+        samples,
+        lufs_target,
+        crest_threshold,
+        cancel,
+        |samples| match denoise {
+            Denoise::None => Ok(()),
+            Denoise::Speexdsp => {
+                denoise_speexdsp_with(samples, speex_level, cancel, NativeSpeex::new)
+            }
+            Denoise::DeepFilter => run_deepfilter(samples, deep_filter_binary(), cancel),
+        },
+    )
+}
+
+fn preprocess_with_denoiser(
+    samples: &mut Vec<i16>,
+    lufs_target: f64,
+    crest_threshold: f64,
+    cancel: &AtomicBool,
+    denoise: impl FnOnce(&mut Vec<i16>) -> Result<()>,
+) -> Result<Gated> {
+    check_cancel(cancel)?;
+    let input_peak = samples
+        .iter()
+        .map(|&s| i32::from(s).abs())
+        .max()
+        .unwrap_or(0);
+    if input_peak == 0 {
+        return Ok(Gated {
+            input_peak,
+            loudness: f64::NEG_INFINITY,
+            gain: 1.0,
+            activity: Activity::default(),
+            voice: false,
+        });
     }
-    Ok(Gated { loudness, voice })
+    let (loudness, gain) = normalize_with_gain(samples, lufs_target)?;
+    check_cancel(cancel)?;
+    denoise(samples)?;
+    check_cancel(cancel)?;
+    let activity = measure_activity(samples, cancel)?;
+    let voice = detect_voice(samples, &activity, crest_threshold, cancel)?;
+    if voice {
+        trim_silence_cancellable(samples, cancel)?;
+    }
+    Ok(Gated {
+        input_peak,
+        loudness,
+        gain,
+        activity,
+        voice,
+    })
 }
 
 pub struct Gated {
+    pub input_peak: i32,
     pub loudness: f64,
+    pub gain: f64,
+    activity: Activity,
     pub voice: bool,
+}
+
+impl Gated {
+    pub fn active_ms(&self) -> usize {
+        self.activity.active_samples / SAMPLES_PER_MS
+    }
+
+    pub fn peak_frame_rms(&self) -> f64 {
+        self.activity.peak_rms
+    }
 }
 
 #[cfg(test)]
@@ -460,7 +552,7 @@ mod tests {
     #[test]
     fn silence_is_not_speech() {
         let silent = vec![0i16; 16_000];
-        assert!(!has_voice(&silent, 2.4));
+        assert!(!has_voice(&silent, 2.4).unwrap());
     }
 
     #[test]
@@ -468,34 +560,271 @@ mod tests {
         // A pure sine has crest ~1.41; speech has much sharper peaks. The
         // gate exists precisely to reject flat noise like this.
         let samples = tone(12_000.0, 16_000);
-        assert!(!has_voice(&samples, 2.4));
+        assert!(!has_voice(&samples, 2.4).unwrap());
     }
 
     #[test]
-    fn impulsive_signal_passes_gate() {
-        // Short bursts separated by silence give a high crest factor.
+    fn sustained_burst_passes_crest_and_vad_gate() {
+        // A voiced burst amid silence gives enough active frames and a high crest factor.
         let mut samples = vec![0i16; 16_000];
-        for burst in samples.chunks_mut(2000).step_by(8) {
-            for slot in burst.iter_mut().take(60) {
-                *slot = 20_000;
-            }
-        }
-        assert!(has_voice(&samples, 2.4));
+        let burst = tone(20_000.0, 3200);
+        samples[3200..6400].copy_from_slice(&burst);
+        assert!(has_voice(&samples, 2.4).unwrap());
     }
 
     #[test]
-    fn zero_threshold_disables_crest_gate() {
-        let quiet = tone(3.0, 16_000);
-        // With the gate at 0, only the VAD decides.
-        let _ = has_voice(&quiet, 0.0);
+    fn zero_crest_threshold_still_requires_sustained_audio_variation() {
+        assert!(has_voice(&tone(3000.0, 1600), 0.0).unwrap());
+        assert!(!has_voice(&tone(3.0, 16_000), 0.0).unwrap());
+        assert!(!has_voice(&[0; 1600], 0.0).unwrap());
+        assert!(!has_voice(&[3000; 1600], 0.0).unwrap());
+        let mut click = [0; 1600];
+        click[320] = 30_000;
+        assert!(!has_voice(&click, 0.0).unwrap());
     }
 
     #[test]
     fn normalize_reaches_target() {
         let mut samples = tone(2000.0, 16_000);
-        let measured = normalize(&mut samples, -16.0);
+        let measured = normalize(&mut samples, -16.0).unwrap();
         assert!(measured < -20.0);
         assert!(samples.iter().any(|s| s.abs() > 2000));
+    }
+
+    #[test]
+    fn very_quiet_and_short_audio_is_amplified_before_the_gate() {
+        for len in [1600, 16_000] {
+            let mut samples = tone(3.0, len);
+            let gated = preprocess(&mut samples, Denoise::Speexdsp, -16.0, -15, 0.0).unwrap();
+            assert!(gated.voice);
+            assert!(gated.gain > 20.0);
+            assert!(samples.iter().any(|&s| i32::from(s).abs() > 100));
+        }
+    }
+
+    #[test]
+    fn only_digital_silence_skips_denoising_and_activity_uses_its_output() {
+        let cancel = AtomicBool::new(false);
+        let mut samples = vec![0; 1600];
+        let gated = preprocess_with_denoiser(&mut samples, -16.0, 0.0, &cancel, |_| {
+            panic!("digital silence must skip the denoiser");
+        })
+        .unwrap();
+        assert_eq!(gated.input_peak, 0);
+        assert!(!gated.voice);
+
+        for input in [vec![1; 1600], tone(3.0, 1600)] {
+            let mut samples = input.clone();
+            let gated = preprocess_with_denoiser(&mut samples, -16.0, 0.0, &cancel, |samples| {
+                assert!(samples.iter().any(|&s| s > 100));
+                if input.iter().all(|&s| s == 1) {
+                    assert!(samples.iter().all(|&s| s == 1000));
+                }
+                samples.fill(0);
+                Ok(())
+            })
+            .unwrap();
+            assert!(!gated.voice);
+            assert_eq!(gated.active_ms(), 0);
+        }
+    }
+
+    #[test]
+    fn dc_only_recording_is_not_speech_after_real_denoising() {
+        for denoise in [Denoise::None, Denoise::Speexdsp] {
+            for len in [1600, 16_000] {
+                let mut samples = vec![1; len];
+                let gated = preprocess(&mut samples, denoise, -16.0, -15, 0.0).unwrap();
+                assert_eq!(gated.gain, 1000.0);
+                assert!(!gated.voice, "{denoise:?}: {} ms", gated.active_ms());
+            }
+        }
+    }
+
+    #[test]
+    fn normalization_preserves_silence_and_avoids_clipping() {
+        let mut silence = vec![0; 1600];
+        let (_, gain) = normalize_with_gain(&mut silence, -16.0).unwrap();
+        assert_eq!(gain, 1.0);
+        assert!(silence.iter().all(|&s| s == 0));
+
+        let mut transient = vec![1; 1600];
+        transient[0] = 30_000;
+        let (_, gain) = normalize_with_gain(&mut transient, -16.0).unwrap();
+        assert!(gain <= 32767.0 / 30_000.0);
+    }
+
+    struct FakeSpeex {
+        fail_request: Option<i32>,
+        calls: std::rc::Rc<std::cell::Cell<usize>>,
+    }
+
+    impl SpeexDenoiser for FakeSpeex {
+        fn configure(&mut self, request: i32, _: i32) -> Result<()> {
+            if self.fail_request == Some(request) {
+                return Err(Error::audio_data("injected configuration failure"));
+            }
+            Ok(())
+        }
+
+        fn process(&mut self, _: &mut [i16; FRAME_SIZE]) -> bool {
+            self.calls.set(self.calls.get() + 1);
+            false
+        }
+    }
+
+    #[test]
+    fn speex_initialization_and_configuration_failures_are_reported() {
+        let cancel = AtomicBool::new(false);
+        let mut samples = vec![123; FRAME_SIZE];
+        let error = denoise_speexdsp_with::<FakeSpeex>(&mut samples, -15, &cancel, || {
+            Err(Error::audio_data("injected initialization failure"))
+        })
+        .unwrap_err();
+        assert!(error.detail.contains("initialization"));
+
+        for request in [
+            dsp::SPEEX_PREPROCESS_SET_DENOISE,
+            dsp::SPEEX_PREPROCESS_SET_NOISE_SUPPRESS,
+        ] {
+            let calls = std::rc::Rc::new(std::cell::Cell::new(0));
+            let error = denoise_speexdsp_with(&mut samples, -15, &cancel, || {
+                Ok(FakeSpeex {
+                    fail_request: Some(request),
+                    calls: calls.clone(),
+                })
+            })
+            .unwrap_err();
+            assert!(error.detail.contains("configuration"));
+            assert_eq!(calls.get(), 0);
+        }
+        assert!(samples.iter().all(|&s| s == 123));
+    }
+
+    #[test]
+    fn speex_cancellation_stops_processing() {
+        let cancel = AtomicBool::new(true);
+        let calls = std::rc::Rc::new(std::cell::Cell::new(0));
+        let mut samples = vec![123; FRAME_SIZE * 4];
+        let error = denoise_speexdsp_with(&mut samples, -15, &cancel, || {
+            Ok(FakeSpeex {
+                fail_request: None,
+                calls: calls.clone(),
+            })
+        })
+        .unwrap_err();
+        assert_eq!(error.category, crate::error::Category::Timeout);
+        assert_eq!(calls.get(), 0);
+    }
+
+    #[test]
+    fn concurrent_speex_jobs_match_independent_results() {
+        let inputs: Vec<_> = [200.0, 2000.0, 12000.0]
+            .into_iter()
+            .map(|amplitude| tone(amplitude, 16_123))
+            .collect();
+        let expected: Vec<_> = inputs
+            .iter()
+            .map(|input| {
+                let mut samples = input.clone();
+                denoise_speexdsp(&mut samples, -15).unwrap();
+                assert_ne!(&samples, input);
+                samples
+            })
+            .collect();
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(inputs.len()));
+        let jobs: Vec<_> = inputs
+            .into_iter()
+            .map(|mut samples| {
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    denoise_speexdsp(&mut samples, -15).unwrap();
+                    samples
+                })
+            })
+            .collect();
+        for (job, expected) in jobs.into_iter().zip(expected) {
+            assert_eq!(job.join().unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn speex_flushes_and_aligns_full_and_partial_frames() {
+        for tail_len in [96, FRAME_SIZE] {
+            let prefix = 20 * FRAME_SIZE;
+            let mut samples = vec![0; prefix];
+            samples.extend(tone(3000.0, tail_len));
+            denoise_speexdsp(&mut samples, -15).unwrap();
+            assert_eq!(samples.len(), prefix + tail_len);
+            assert!(samples[..prefix - FRAME_SIZE].iter().all(|&s| s == 0));
+            assert!(samples[prefix..].iter().any(|&s| i32::from(s).abs() > 1000));
+        }
+
+        let mut very_short = tone(1000.0, 96);
+        denoise_speexdsp(&mut very_short, -15).unwrap();
+        assert!(very_short.iter().any(|&s| i32::from(s).abs() > 100));
+    }
+
+    #[test]
+    fn concurrent_deepfilter_jobs_use_independent_files() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!(
+            "ainput-deepfilter-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir(&dir).unwrap();
+        struct Cleanup(PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let _cleanup = Cleanup(dir.clone());
+        let helper = dir.join("deep-filter");
+        std::fs::write(
+            &helper,
+            r##"#!/bin/sh
+root=$(dirname "$0")
+touch "$root/ready-$$"
+i=0
+while [ "$(find "$root" -name 'ready-*' | wc -l)" -lt 3 ]; do
+    i=$((i+1))
+    [ "$i" -lt 150 ] || exit 1
+    sleep 0.02
+done
+cp "$4" "$3/input_48k_df.wav"
+"##,
+        )
+        .unwrap();
+        std::fs::set_permissions(&helper, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let inputs: Vec<_> = [200.0, 2000.0, 12000.0]
+            .into_iter()
+            .map(|amplitude| tone(amplitude, 4000))
+            .collect();
+        let expected: Vec<_> = inputs
+            .iter()
+            .map(|input| {
+                resample(&resample(input, 16_000, 48_000).unwrap(), 48_000, 16_000).unwrap()
+            })
+            .collect();
+        let jobs: Vec<_> = inputs
+            .into_iter()
+            .map(|mut samples| {
+                let helper = helper.clone();
+                std::thread::spawn(move || {
+                    run_deepfilter(&mut samples, helper, &AtomicBool::new(false)).unwrap();
+                    samples
+                })
+            })
+            .collect();
+        for (job, expected) in jobs.into_iter().zip(expected) {
+            assert_eq!(job.join().unwrap(), expected);
+        }
     }
 
     #[test]
@@ -513,7 +842,31 @@ mod tests {
         samples.extend(tone(12_000.0, 16_000));
         samples.extend(vec![0i16; 8000]);
         let before = samples.len();
-        trim_silence(&mut samples);
+        trim_silence(&mut samples).unwrap();
         assert!(samples.len() < before);
+    }
+
+    #[test]
+    fn trim_preserves_speech_at_start() {
+        let mut samples = tone(12_000.0, 16_000);
+        samples.extend(vec![0; 8000]);
+        let beginning = samples[..3200].to_vec();
+        trim_silence(&mut samples).unwrap();
+        assert_eq!(&samples[..beginning.len()], beginning);
+    }
+
+    #[test]
+    fn trim_preserves_partial_final_frame() {
+        let mut samples = tone(12_000.0, 3199);
+        let original = samples.clone();
+        trim_silence(&mut samples).unwrap();
+        assert_eq!(samples, original);
+
+        let tail = tone(20.0, 159);
+        let mut samples = tone(12_000.0, 3200);
+        samples.resize(16_000, 0);
+        samples.extend_from_slice(&tail);
+        trim_silence(&mut samples).unwrap();
+        assert!(samples.ends_with(&tail));
     }
 }
