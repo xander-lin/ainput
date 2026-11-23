@@ -13,18 +13,16 @@ use crate::settings::Denoise;
 
 pub const FRAME_SIZE: usize = 320; // 20 ms at 16 kHz
 const SAMPLES_PER_MS: usize = 16;
-const MIN_ACTIVE_SAMPLES: usize = 250 * SAMPLES_PER_MS;
 const MIN_FRAME_RMS: f64 = 64.0; // about -54 dBFS
+/// Default `Gate::min_active_ms`.
+pub const DEFAULT_MIN_ACTIVE_MS: i32 = 250;
+/// Default `Gate::lufs_margin`.
+pub const DEFAULT_LUFS_MARGIN: f64 = 5.0;
 
-/// EBU R128 normalization to `target_lufs`, returning the measured loudness.
-pub fn normalize(samples: &mut [i16], target_lufs: f64) -> Result<f64> {
-    Ok(normalize_with_gain(samples, target_lufs)?.0)
-}
-
-fn normalize_with_gain(samples: &mut [i16], target_lufs: f64) -> Result<(f64, f64)> {
-    if samples.is_empty() {
-        return Ok((f64::NEG_INFINITY, 1.0));
-    }
+/// EBU R128 integrated loudness in LUFS. Negative infinity when nothing is
+/// loud enough to measure: the absolute gate sits at -70 LUFS and one
+/// measurement block spans 400 ms.
+fn integrated_loudness(samples: &[i16]) -> Result<f64> {
     let state = unsafe { dsp::ebur128_init(1, 16_000, dsp::EBUR128_MODE_I) };
     if state.is_null() {
         return Err(Error::audio_data(
@@ -44,6 +42,19 @@ fn normalize_with_gain(samples: &mut [i16], target_lufs: f64) -> Result<(f64, f6
             "loudness measurement failed (add={add_status}, measure={measure_status})"
         )));
     }
+    Ok(loudness)
+}
+
+/// EBU R128 normalization to `target_lufs`, returning the measured loudness.
+pub fn normalize(samples: &mut [i16], target_lufs: f64) -> Result<f64> {
+    Ok(normalize_with_gain(samples, target_lufs)?.0)
+}
+
+fn normalize_with_gain(samples: &mut [i16], target_lufs: f64) -> Result<(f64, f64)> {
+    if samples.is_empty() {
+        return Ok((f64::NEG_INFINITY, 1.0));
+    }
+    let loudness = integrated_loudness(samples)?;
 
     let mut sum_sq = 0.0;
     let mut peak = 0.0f64;
@@ -109,23 +120,44 @@ fn measure_activity(samples: &[i16], cancel: &AtomicBool) -> Result<Activity> {
     Ok(activity)
 }
 
-/// Speech detection on normalized, denoised samples.
+/// Speech-gate parameters, applied to the normalized and denoised recording.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Gate {
+    /// Minimum total time of active audio. A 20 ms frame is active when its
+    /// variation reaches `MIN_FRAME_RMS`.
+    pub min_active_ms: i32,
+    /// Optional crest and VAD checks after denoising. `0` skips both.
+    pub crest_threshold: f64,
+    /// How far below the normalization target the denoised audio may fall
+    /// and still count as speech, in LUFS. `0` disables the check.
+    pub lufs_margin: f64,
+}
+
+impl Gate {
+    /// Every parameter at its default except the crest threshold.
+    pub fn with_crest(crest_threshold: f64) -> Self {
+        Self {
+            min_active_ms: DEFAULT_MIN_ACTIVE_MS,
+            crest_threshold,
+            lufs_margin: DEFAULT_LUFS_MARGIN,
+        }
+    }
+}
+
+/// Speech detection on normalized, denoised samples, with the gate
+/// parameters at their default except `crest_threshold`.
 pub fn has_voice(samples: &[i16], crest_threshold: f64) -> Result<bool> {
     let cancel = AtomicBool::new(false);
     let activity = measure_activity(samples, &cancel)?;
-    detect_voice(samples, &activity, crest_threshold, &cancel)
+    detect_voice(samples, &activity, &Gate::with_crest(crest_threshold), &cancel)
 }
 
-fn detect_voice(
-    samples: &[i16],
-    activity: &Activity,
-    crest_threshold: f64,
-    cancel: &AtomicBool,
-) -> Result<bool> {
-    if activity.active_samples < MIN_ACTIVE_SAMPLES {
+fn detect_voice(samples: &[i16], activity: &Activity, gate: &Gate, cancel: &AtomicBool) -> Result<bool> {
+    let min_active = gate.min_active_ms.max(0) as usize * SAMPLES_PER_MS;
+    if activity.active_samples < min_active {
         return Ok(false);
     }
-    if crest_threshold <= 0.0 {
+    if gate.crest_threshold <= 0.0 {
         return Ok(true);
     }
 
@@ -136,7 +168,7 @@ fn detect_voice(
             (peak.max(value.abs()), sum_sq + value * value)
         });
     let rms = (sum_sq / samples.len() as f64).sqrt();
-    if peak < crest_threshold * rms {
+    if peak < gate.crest_threshold * rms {
         return Ok(false);
     }
 
@@ -444,7 +476,8 @@ fn run_deepfilter(samples: &mut Vec<i16>, binary: PathBuf, cancel: &AtomicBool) 
     Ok(())
 }
 
-/// Full preprocessing pipeline. Returns an error when a configured denoiser
+/// Full preprocessing pipeline with every gate parameter at its default
+/// except `crest_threshold`. Returns an error when a configured denoiser
 /// could not run, so the caller can surface it.
 pub fn preprocess(
     samples: &mut Vec<i16>,
@@ -458,40 +491,41 @@ pub fn preprocess(
         denoise,
         lufs_target,
         speex_level,
-        crest_threshold,
+        Gate::with_crest(crest_threshold),
         &AtomicBool::new(false),
     )
 }
+
+/// A denoiser that may borrow from its caller for the duration of one run.
+type Denoiser<'a> = Box<dyn FnOnce(&mut Vec<i16>) -> Result<()> + 'a>;
 
 pub(crate) fn preprocess_cancellable(
     samples: &mut Vec<i16>,
     denoise: Denoise,
     lufs_target: f64,
     speex_level: i32,
-    crest_threshold: f64,
+    gate: Gate,
     cancel: &AtomicBool,
 ) -> Result<Gated> {
-    preprocess_with_denoiser(
-        samples,
-        lufs_target,
-        crest_threshold,
-        cancel,
-        |samples| match denoise {
+    let denoiser = (denoise != Denoise::None).then(|| {
+        Box::new(move |samples: &mut Vec<i16>| match denoise {
             Denoise::None => Ok(()),
             Denoise::Speexdsp => {
                 denoise_speexdsp_with(samples, speex_level, cancel, NativeSpeex::new)
             }
             Denoise::DeepFilter => run_deepfilter(samples, deep_filter_binary(), cancel),
-        },
-    )
+        }) as Denoiser
+    });
+    preprocess_with_denoiser(samples, lufs_target, &gate, cancel, denoiser)
 }
 
+/// `denoise` is `None` when no denoiser is enabled.
 fn preprocess_with_denoiser(
     samples: &mut Vec<i16>,
     lufs_target: f64,
-    crest_threshold: f64,
+    gate: &Gate,
     cancel: &AtomicBool,
-    denoise: impl FnOnce(&mut Vec<i16>) -> Result<()>,
+    denoise: Option<Denoiser<'_>>,
 ) -> Result<Gated> {
     check_cancel(cancel)?;
     let input_peak = samples
@@ -503,6 +537,7 @@ fn preprocess_with_denoiser(
         return Ok(Gated {
             input_peak,
             loudness: f64::NEG_INFINITY,
+            output_loudness: f64::NEG_INFINITY,
             gain: 1.0,
             activity: Activity::default(),
             voice: false,
@@ -511,17 +546,42 @@ fn preprocess_with_denoiser(
     let input_is_constant = samples.iter().all(|&sample| sample == samples[0]);
     let (loudness, gain) = normalize_with_gain(samples, lufs_target)?;
     check_cancel(cancel)?;
-    denoise(samples)?;
+    let denoised = denoise.is_some();
+    if let Some(denoise) = denoise {
+        denoise(samples)?;
+    }
     check_cancel(cancel)?;
     let activity = measure_activity(samples, cancel)?;
+
+    // Loudness gate. Normalization puts the recording at `lufs_target`, and
+    // the denoiser then removes whatever it takes for noise. Speech survives
+    // that nearly unchanged, so audio that is mostly speech stays within
+    // `lufs_margin` of the target, while noise alone falls far below it.
+    //
+    // Both premises must hold for the comparison to mean anything: the
+    // recording really was normalized to the target (R128 measured it, so it
+    // is at least 400 ms and louder than -70 LUFS), and a denoiser ran. With
+    // no denoiser the normalized audio sits at the target by construction and
+    // the gate could not tell speech from noise. Otherwise it is skipped.
+    let measurable = denoised && loudness.is_finite();
+    let output_loudness = if measurable {
+        integrated_loudness(samples)?
+    } else {
+        f64::NEG_INFINITY
+    };
+    let loud_enough = !(measurable && gate.lufs_margin > 0.0)
+        || output_loudness > lufs_target - gate.lufs_margin;
     // A flat capture can only develop variation through processing artifacts.
-    let voice = !input_is_constant && detect_voice(samples, &activity, crest_threshold, cancel)?;
+    let voice = loud_enough
+        && !input_is_constant
+        && detect_voice(samples, &activity, gate, cancel)?;
     if voice {
         trim_silence_cancellable(samples, cancel)?;
     }
     Ok(Gated {
         input_peak,
         loudness,
+        output_loudness,
         gain,
         activity,
         voice,
@@ -530,7 +590,12 @@ fn preprocess_with_denoiser(
 
 pub struct Gated {
     pub input_peak: i32,
+    /// Integrated loudness of the capture, before normalization.
     pub loudness: f64,
+    /// Integrated loudness after denoising. Measured only when the recording
+    /// was normalized to its target and a denoiser ran (see the loudness
+    /// gate); negative infinity otherwise.
+    pub output_loudness: f64,
     pub gain: f64,
     activity: Activity,
     pub voice: bool,
@@ -624,24 +689,37 @@ mod tests {
     #[test]
     fn only_digital_silence_skips_denoising_and_activity_uses_its_output() {
         let cancel = AtomicBool::new(false);
+        let gate = Gate::with_crest(0.0);
         let mut samples = vec![0; 1600];
-        let gated = preprocess_with_denoiser(&mut samples, -16.0, 0.0, &cancel, |_| {
-            panic!("digital silence must skip the denoiser");
-        })
+        let gated = preprocess_with_denoiser(
+            &mut samples,
+            -16.0,
+            &gate,
+            &cancel,
+            Some(Box::new(|_: &mut Vec<i16>| {
+                panic!("digital silence must skip the denoiser");
+            })),
+        )
         .unwrap();
         assert_eq!(gated.input_peak, 0);
         assert!(!gated.voice);
 
         for input in [vec![1; 4800], tone(3.0, 4800)] {
             let mut samples = input.clone();
-            let gated = preprocess_with_denoiser(&mut samples, -16.0, 0.0, &cancel, |samples| {
-                assert!(samples.iter().any(|&s| s > 100));
-                if input.iter().all(|&s| s == 1) {
-                    assert!(samples.iter().all(|&s| s == 1000));
-                }
-                samples.fill(0);
-                Ok(())
-            })
+            let gated = preprocess_with_denoiser(
+                &mut samples,
+                -16.0,
+                &gate,
+                &cancel,
+                Some(Box::new(|samples: &mut Vec<i16>| {
+                    assert!(samples.iter().any(|&s| s > 100));
+                    if input.iter().all(|&s| s == 1) {
+                        assert!(samples.iter().all(|&s| s == 1000));
+                    }
+                    samples.fill(0);
+                    Ok(())
+                })),
+            )
             .unwrap();
             assert!(!gated.voice);
             assert_eq!(gated.active_ms(), 0);
@@ -676,6 +754,96 @@ mod tests {
         transient[0] = 30_000;
         let (_, gain) = normalize_with_gain(&mut transient, -16.0).unwrap();
         assert!(gain <= 32767.0 / 30_000.0);
+    }
+
+    /// Stands in for a denoiser that removes a known share of the signal.
+    fn attenuate(factor: f64) -> Denoiser<'static> {
+        Box::new(move |samples| {
+            for sample in samples.iter_mut() {
+                *sample = (*sample as f64 * factor) as i16;
+            }
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn loudness_gate_compares_the_denoised_audio_with_the_target() {
+        let cancel = AtomicBool::new(false);
+        // One second, so R128 can measure the recording before and after.
+        let run = |factor: f64, margin: f64| {
+            let gate = Gate {
+                lufs_margin: margin,
+                ..Gate::with_crest(0.0)
+            };
+            let mut samples = tone(3000.0, 16_000);
+            preprocess_with_denoiser(&mut samples, -16.0, &gate, &cancel, Some(attenuate(factor)))
+                .unwrap()
+        };
+
+        // Speech that survives denoising: about 1 LU below the target.
+        let kept = run(0.9, 5.0);
+        assert!(kept.voice);
+        assert!((kept.output_loudness - (-16.0 + 20.0 * 0.9f64.log10())).abs() < 0.5);
+
+        // 6 LU below the target is past the default margin...
+        let dropped = run(0.5, 5.0);
+        assert!(!dropped.voice);
+        // ...but inside a wider one, and not checked at all when it is off.
+        assert!(run(0.5, 7.0).voice);
+        // It is still measured then, so the journal can show the distance.
+        let far = run(0.1, 0.0);
+        assert!(far.voice);
+        assert!((far.output_loudness - (-36.0)).abs() < 0.5);
+    }
+
+    #[test]
+    fn loudness_gate_needs_a_denoiser_and_a_measurable_recording() {
+        let cancel = AtomicBool::new(false);
+        let gate = Gate::with_crest(0.0);
+
+        // Without a denoiser the normalized audio sits at the target by
+        // construction: the gate could not tell speech from noise, so it is
+        // skipped and nothing is measured.
+        let mut samples = tone(3000.0, 16_000);
+        let undenoised =
+            preprocess_with_denoiser(&mut samples, -16.0, &gate, &cancel, None).unwrap();
+        assert!(undenoised.voice);
+        assert_eq!(undenoised.output_loudness, f64::NEG_INFINITY);
+
+        // Shorter than one R128 block: the gain came from the RMS fallback,
+        // so "normalized to the target" is not established. The gate is
+        // skipped even though a denoiser ran.
+        let mut samples = tone(3000.0, 300 * SAMPLES_PER_MS);
+        let short = preprocess_with_denoiser(
+            &mut samples,
+            -16.0,
+            &gate,
+            &cancel,
+            Some(attenuate(0.1)),
+        )
+        .unwrap();
+        assert!(short.voice);
+        assert_eq!(short.output_loudness, f64::NEG_INFINITY);
+    }
+
+    #[test]
+    fn active_time_threshold_is_configurable() {
+        let cancel = AtomicBool::new(false);
+        // 300 ms of tone and no denoiser: only the time threshold decides.
+        let passes = |min_active_ms: i32| {
+            let gate = Gate {
+                min_active_ms,
+                ..Gate::with_crest(0.0)
+            };
+            let mut samples = tone(3000.0, 300 * SAMPLES_PER_MS);
+            preprocess_with_denoiser(&mut samples, -16.0, &gate, &cancel, None)
+                .unwrap()
+                .voice
+        };
+        assert!(passes(DEFAULT_MIN_ACTIVE_MS));
+        assert!(passes(300));
+        assert!(!passes(301));
+        assert!(!passes(1000));
     }
 
     struct FakeSpeex {

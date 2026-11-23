@@ -99,6 +99,12 @@ pub struct Settings {
     pub lufs_target: f64,
     pub speex_level: i32,
     pub crest_threshold: f64,
+    /// Minimum total time of active audio for a recording to count as
+    /// speech. Default 250 ms; one 20 ms frame is the smallest useful value.
+    pub min_active_ms: i32,
+    /// How far below `lufs_target` the denoised audio may fall and still
+    /// count as speech. Default 5 LUFS; 0 disables the loudness gate.
+    pub lufs_margin: f64,
     pub credentials: Credentials,
 }
 
@@ -114,6 +120,8 @@ impl Default for Settings {
             lufs_target: -16.0,
             speex_level: -15,
             crest_threshold: 2.4,
+            min_active_ms: crate::dsp::DEFAULT_MIN_ACTIVE_MS,
+            lufs_margin: crate::dsp::DEFAULT_LUFS_MARGIN,
             credentials: Credentials::default(),
         }
     }
@@ -140,7 +148,24 @@ impl Settings {
         if self.crest_threshold < 0.0 {
             self.crest_threshold = 0.0;
         }
+        self.min_active_ms = self.min_active_ms.clamp(20, 10_000);
+        // 0 disables the loudness gate, so anything that is not a positive
+        // number (negative, NaN) reads as disabled rather than "strictest".
+        if self.lufs_margin > 0.0 {
+            self.lufs_margin = self.lufs_margin.min(60.0);
+        } else {
+            self.lufs_margin = 0.0;
+        }
         self
+    }
+
+    /// The speech gate as the DSP layer takes it.
+    pub fn gate(&self) -> crate::dsp::Gate {
+        crate::dsp::Gate {
+            min_active_ms: self.min_active_ms,
+            crest_threshold: self.crest_threshold,
+            lufs_margin: self.lufs_margin,
+        }
     }
 }
 
@@ -249,5 +274,32 @@ mod tests {
         assert_eq!(clamped.speex_level, 0);
         assert_eq!(clamped.crest_threshold, 0.0);
         assert_eq!(clamped.lufs_target, -16.0);
+    }
+
+    #[test]
+    fn speech_gate_defaults_and_clamps() {
+        let settings = Settings::default();
+        assert_eq!(settings.min_active_ms, 250);
+        assert_eq!(settings.lufs_margin, 5.0);
+        assert_eq!(settings.gate(), crate::dsp::Gate::with_crest(2.4));
+
+        let with = |min_active_ms, lufs_margin| {
+            Settings {
+                min_active_ms,
+                lufs_margin,
+                ..Settings::default()
+            }
+            .sanitized()
+        };
+        // One frame is the smallest threshold that can be met.
+        assert_eq!(with(1, 4.5).min_active_ms, 20);
+        assert_eq!(with(1_000_000, 4.5).min_active_ms, 10_000);
+        assert_eq!(with(300, 4.5).lufs_margin, 4.5);
+        assert_eq!(with(300, 500.0).lufs_margin, 60.0);
+        // Not a positive number disables the loudness gate; it must not read
+        // as the strictest possible gate.
+        for margin in [0.0, -3.0, f64::NAN] {
+            assert_eq!(with(300, margin).lufs_margin, 0.0);
+        }
     }
 }

@@ -55,15 +55,17 @@ CapsLock release
   -> panel shows "processing audio...", engine.stop() signals the thread,
      CapsLock restored through uinput
   -> dictation thread finishes preprocessing and starts recognition
+     (speech gate: active time, loudness after denoising, optional crest/VAD)
   -> provider runs (cloud: HTTP; local: one child process)
   -> on_text / on_error → OutputHandler → in-order delivery per input context
 ```
 
-A failed dictation also sends a desktop notification, so a subsequent
-dictation cannot erase the error by updating the input panel. Two outcomes
-are not failures and stay in the panel only: the local speech gate rejecting
-a recording, and the backend returning no text. Apart from these, desktop
-notifications are used only by the provider and denoiser switch.
+The input panel is the primary channel for every outcome, and it belongs to
+the newest dictation of its input context: its live status must not be
+overwritten. A terminal outcome that arrives while a newer dictation is still
+outstanding in the same context therefore goes to the desktop notification
+instead of the panel. That is the only use of notifications apart from the
+provider and denoiser switch, which always notify.
 
 `Ctrl+CapsLock` enters switch mode without recording. `←/→` or `h/l` change the
 backend, `↑/↓` or `k/j` change the denoiser. Both are written to
@@ -166,9 +168,10 @@ reported to the user. There is no third option.
 | Missing API key / model file | panel shows the exact file to edit |
 | Denoise helper missing | recording is **discarded** with a setup error, not sent undenoised |
 | Microphone unavailable | `Ainput: microphone ...` immediately, not an empty result |
-| Local speech gate rejects the recording | panel only: `no speech detected locally; audio was not sent` |
-| Backend processed the audio, no text | panel only: `no speech recognized by the ASR backend` |
-| Backend unreachable or too slow | panel and notification: `ASR backend did not respond (...)` |
+| Local speech gate rejects the recording | panel: `no speech detected locally; audio was not sent` |
+| Backend processed the audio, no text | panel: `no speech recognized by the ASR backend` |
+| Any other failure | panel: one sentence per category |
+| Any terminal outcome while a newer dictation owns the panel | desktop notification, so the live status stays |
 | Input context gone before commit | result is discarded and the recording ID is logged |
 | `/dev/uinput` unavailable | one warning naming the udev rule; voice input still works |
 | Queue full | `recognition queue full; try again`, newest recording discarded |

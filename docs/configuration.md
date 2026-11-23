@@ -36,7 +36,9 @@ should be asked to make:
 | `BufferMs` | `20` | Microphone fragment size (6–1000 ms). Raise only if the end of a phrase is cut off | *file only* |
 | `LufsTarget` | `-16.0` | Loudness normalization target in LUFS | *file only* |
 | `SpeexLevel` | `-15` | speexdsp suppression strength in dB | *file only* |
-| `CrestThreshold` | `2.4` | Optional crest and VAD checks after denoising. `0` skips both checks. All recordings still need enough variation and level after processing. | *file only* |
+| `MinActiveMsec` | `250` | Minimum total time of active audio for a recording to count as speech (20–10000 ms) | *file only* |
+| `LufsMargin` | `5.0` | How far below `LufsTarget` the denoised audio may fall and still count as speech, in LUFS. `0` disables the check | *file only* |
+| `CrestThreshold` | `2.4` | Optional crest and VAD checks after denoising. `0` skips both checks. | *file only* |
 
 fcitx5 only writes options that differ from their default, so the file stays
 short. Missing options mean "default".
@@ -113,6 +115,43 @@ no longer exists.
 `~/.local/share/ainput/bin/deep-filter`; when it is missing the recording is
 **not** silently processed undenoised — the status panel reports
 `Ainput: local engine setup error: ...` and the recording is discarded.
+
+### Speech gate
+
+A recording is sent to the backend only if it passes every check that applies.
+The checks run on the audio after normalization and, when enabled, denoising:
+
+1. **Not silent, not flat.** An all-zero or perfectly constant capture is
+   rejected.
+2. **Active time.** The audio is cut into 20 ms frames. A frame is active when
+   its variation around the mean reaches 64 counts (about −54 dBFS). At least
+   `MinActiveMsec` of active frames are required.
+3. **Loudness.** Only when a denoiser is enabled, and only when R128 could
+   measure the recording (at least 400 ms and louder than −70 LUFS): the
+   integrated loudness after denoising must exceed `LufsTarget - LufsMargin`.
+   Normalization puts the recording at `LufsTarget`; speech survives the
+   denoiser nearly unchanged, noise does not. Without a denoiser the check is
+   meaningless, because the normalized audio sits at the target by
+   construction.
+4. **Crest and VAD.** Only when `CrestThreshold` is above `0`: the peak must
+   exceed that many times the RMS, and the VAD must flag at least 5 frames and
+   15% of all frames.
+
+A rejected recording is reported as
+`Ainput: no speech detected locally; audio was not sent`. The
+`Ainput: id=... audio ...` line of every recording in the fcitx5 journal shows
+what the gate compared: `active_ms` with `min_active_ms`, `denoised_lufs` (the
+loudness after denoising) with `lufs_target` minus `lufs_margin`, and `voice`,
+the result. Compare them to see which check failed, then raise that limit.
+`denoised_lufs=-inf` means the loudness check was skipped: no denoiser was
+enabled, or R128 could not measure the recording.
+
+The default margin was measured with speexdsp at `SpeexLevel=-15`: speech
+passed down to 0 dB signal-to-noise ratio with about 2 LU to spare, speech at
+−10 dB was borderline, and stationary noise fell just past the margin. The
+distance between noise and the margin is small and it moves with
+`SpeexLevel`, so treat the loudness check as a way to drop clearly silent
+recordings, not as a noise classifier. See `found.md` #39.
 
 ## Provider files
 

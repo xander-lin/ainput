@@ -11,16 +11,6 @@
 
 namespace ainput {
 
-/// Outcomes that are not failures: the recording simply had nothing to
-/// transcribe. `AINPUT_ERR_NO_SPEECH` comes only from the local speech gate,
-/// so the audio was never sent; `AINPUT_ERR_EMPTY_RESULT` means the backend
-/// processed the audio and returned no text. Both stay in the input panel and
-/// are never raised as desktop notifications, which are reserved for failures
-/// and for the provider / denoiser switch.
-inline bool isNoResult(int32_t category) {
-    return category == AINPUT_ERR_NO_SPEECH || category == AINPUT_ERR_EMPTY_RESULT;
-}
-
 /// Folds line breaks into spaces, so one status is always one panel line.
 inline std::string oneLine(const std::string &text) {
     std::string out = text;
@@ -46,7 +36,9 @@ inline std::string truncate(const std::string &text, std::size_t limit) {
     return text.substr(0, end) + "...";
 }
 
-/// One actionable sentence per error category.
+/// One actionable sentence per error category, i.e. per terminal outcome
+/// without text. Every one of them goes to the input panel, or to the
+/// desktop notification when a newer dictation owns the panel.
 ///
 /// "Nothing was transcribed" says where that was decided, because the three
 /// cases call for different reactions:

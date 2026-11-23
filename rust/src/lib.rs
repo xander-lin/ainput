@@ -64,6 +64,8 @@ pub struct RawSettings {
     pub lufs_target: f64,
     pub speex_level: i32,
     pub crest_threshold: f64,
+    pub min_active_ms: i32,
+    pub lufs_margin: f64,
     pub qwen_api_key: *const c_char,
     pub qwen_model: *const c_char,
     pub doubao_api_key: *const c_char,
@@ -168,6 +170,8 @@ pub extern "C" fn ainput_engine_set_settings(
         lufs_target: raw.lufs_target,
         speex_level: raw.speex_level,
         crest_threshold: raw.crest_threshold,
+        min_active_ms: raw.min_active_ms,
+        lufs_margin: raw.lufs_margin,
         credentials,
     };
     let handle = unsafe { &*engine };
@@ -370,6 +374,9 @@ pub extern "C" fn ainput_migrate_legacy_config(
         (*out).lufs_target = settings.lufs_target;
         (*out).speex_level = settings.speex_level;
         (*out).crest_threshold = settings.crest_threshold;
+        // The pre-0.2 file has no speech-gate thresholds: these are defaults.
+        (*out).min_active_ms = settings.min_active_ms;
+        (*out).lufs_margin = settings.lufs_margin;
     }
     // The provider string is intentionally kept alive for the process
     // lifetime: the shell copies it immediately, and leaking one small

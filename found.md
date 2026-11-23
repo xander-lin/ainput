@@ -901,7 +901,8 @@
   update. The drain also clears the panel during successful delivery.
 - **Correction.** Deliver each terminal error as a desktop notification
   independently of the current recording's transient status. Refined by #37:
-  an outcome that is not a failure stays in the panel.
+  the panel comes first; a failure is notified only while a newer dictation
+  owns the panel.
 - **Prevention.** Test an error followed by a successful dictation in the
   same input context and assert that both final outcomes are observable.
   Initialize the embedded fcitx5 instance before focusing the test input
@@ -920,7 +921,7 @@
 - **Prevention**: Build the release with both the native and aarch64 setups
   after adding a test executable. Check that native Meson still runs it.
 
-## 37. "No speech" hid where the decision was made, and raised a notification
+## 37. "No speech" hid where the decision was made, and notifications were overused
 
 - **Mistake and context.** A user dictated into silence with the Qwen
   backend. The input panel showed
@@ -934,27 +935,36 @@
      and Doubao's silent status `20000003` was filed under `NoSpeech`. The
      panel could not tell a local gate rejection (audio never sent) from a
      backend that processed the audio and found nothing.
-  3. #35 routed every terminal error through the desktop notification,
-     including "nothing to transcribe", which is not a failure.
+  3. #35 routed every terminal error through the desktop notification:
+     "nothing to transcribe", which is not a failure, and every network
+     error or timeout even while the input panel was free to show them.
 - **Root cause.** The category followed the vendor's transport status
   instead of the meaning for the user, and one category covered two
-  different stages of the pipeline. The notification fix in #35 was written
-  for failures and never asked which terminal outcomes are not failures.
+  different stages of the pipeline. The notification fix in #35 answered
+  "how is a failure never lost" without asking what the panel can carry. A
+  notification is an interruption; the panel is the product's own channel.
 - **Correction.** `NoSpeech` is produced only by the local speech gate.
   Every backend answer without text, including Qwen's HTTP 400
-  `ASR_RESPONSE_HAVE_NO_WORDS` and Doubao `20000003`, is `EmptyResult`
-  (`shell/status.h`, `OutputHandler::noResult`). The panel says where the
-  decision was made; only failures are notified. The core now writes its
-  raw description to the journal before reporting an error.
+  `ASR_RESPONSE_HAVE_NO_WORDS` and Doubao `20000003`, is `EmptyResult`.
+  The panel is the primary channel and belongs to the newest dictation of
+  its input context. A terminal outcome that arrives while a newer dictation
+  is outstanding there is notified at once: it cannot wait, and showing it
+  would overwrite the live status. Nothing else notifies apart from the
+  provider and denoiser switch. The core writes its raw description to the
+  journal before reporting an error.
 - **Prevention.**
   - An error category names the stage that decided, not the wire status.
     When a vendor reports an expected outcome with an error status, map
     that code explicitly before the generic status fallthrough.
   - Test each documented vendor "empty result" code through the real request
     path against a local server, not only through the classifier.
-  - Before routing an outcome to the failure notification, ask whether the
-    user would call it a failure. Assert the routing in a test, not only
-    the sentence.
+  - Before adding a notification, ask what the panel can carry at that
+    moment. Reserve notifications for what it cannot show, and assert each
+    routing in a test: panel when free, notification only while occupied.
+  - Ask for the classification before building per-outcome policy. The
+    first implementation invented a third rule, holding "nothing to
+    transcribe" for the panel, which the product rule never asked for; the
+    rule turned out to be two classes, and the holding code was removed.
 
 ## 38. The embedded fcitx5 event loop is run once per test process
 
@@ -971,3 +981,53 @@
   batch is still being drained.
 - **Prevention.** One `exec()` per embedded instance. To assert a state
   between two deliveries, hook the commit instead of re-running the loop.
+
+## 39. The speech gate had no level criterion, and the loudness one is narrow (found 2026-11)
+
+- **Mistake and context.** With `CrestThreshold=0` the only check left was
+  "250 ms of frames whose variation reaches 64 counts" (about −54 dBFS,
+  some 38 dB below the −16 LUFS normalization target). Normalization puts
+  every recording at the target first, so room noise passed and was sent to
+  the backend, which answered "no words". #33 had accepted that as the
+  contract of the activity check, but an absolute floor only separates a
+  recording from digital silence; it cannot see speech and noise once both
+  have been raised to the same loudness.
+- **Correction.** A loudness gate: with a denoiser enabled, the integrated
+  loudness after denoising must exceed `LufsTarget - LufsMargin`. Both it
+  and the active time (`MinActiveMsec`) are file-only options, and the
+  journal prints `denoised_lufs` next to the gate parameters of every
+  recording.
+- **Measurement.** One public 16 kHz read-speech sample, cut into eleven
+  3 s clips and scaled to a −30 dBFS peak, with synthetic noise; SpeexDSP
+  at −15 dB, the production `dsp::preprocess`. Not a microphone.
+
+  | Input | Drop below the target after denoising |
+  |-------|----------------------------------------|
+  | clean speech, speech at +20 or +10 dB SNR | 0.1–1.7 LU |
+  | speech at 0 dB SNR | 0.5–2.9 LU |
+  | speech at −10 dB SNR | 4.8–5.0 LU |
+  | white noise alone | 5.2–5.3 LU |
+  | brown noise alone | 4.9–5.0 LU |
+
+  At the default 5 LUFS margin, speech passes down to 0 dB SNR with about
+  2 LU to spare, speech at −10 dB lands on the margin (10 of 11 clips still
+  passed), white noise is rejected by 0.2 LU, and brown noise passes.
+- **Why the criterion is narrow.** SpeexDSP barely separates noise from
+  noisy speech. The denoised loudness of noise alone sits 5.2 LU below the
+  target at `SpeexLevel=-15`, but 2.3–2.5 LU at −25 and below, while its
+  output RMS stays near −24 dBFS either way: the margin rejects noise for
+  one suppression setting, and by a hair. A neural denoiser may behave as
+  the rule assumes; `deepfilter` was not measured. Normalization's clip
+  guard also costs peaky recordings part of the margin before the denoiser
+  runs, which is why even clean speech shows up to 1.7 LU.
+- **Prevention.**
+  - A gate on normalized audio needs a criterion relative to the target.
+    An absolute RMS floor cannot be tightened into a speech gate.
+  - Measure a new threshold through the production function on real speech
+    before fixing a default, and print the compared values in the journal
+    so the default can be checked on a real microphone. Record which
+    denoiser and suppression level the default was measured with.
+  - When a probe reports a suspicious constant (here every noisy input at
+    exactly −21.2 LUFS), check the probe before the pipeline: a missing
+    scale factor had made the labelled SNR 30 dB too low, and the first
+    table drawn from it was wrong.

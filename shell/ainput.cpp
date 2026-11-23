@@ -142,6 +142,16 @@ FCITX_CONFIGURATION(
     // absent from the file.
     fcitx::HiddenOption<double, fcitx::NoConstrain<double>, fcitx::DoubleMarshaller> crestThreshold{
         this, "CrestThreshold", "Optional crest and VAD gate (0 skips both checks)", 2.4};
+    // The rest of the speech gate. Like the settings above, these only
+    // matter when speech is rejected or noise is sent, so they stay out of
+    // the dialog; the journal prints the measured values for every recording.
+    fcitx::HiddenOption<int, fcitx::IntConstrain> minActiveMsec{
+        this, "MinActiveMsec", "Minimum active audio to count as speech (ms)", 250,
+        fcitx::IntConstrain(20, 10000)};
+    fcitx::HiddenOption<double, fcitx::NoConstrain<double>, fcitx::DoubleMarshaller> lufsMargin{
+        this, "LufsMargin",
+        "How far below LufsTarget denoised audio may fall and still count as speech (LUFS, 0 disables)",
+        5.0};
 
     // ---- credentials and model ids ----
     // These override the values in ~/.config/ainput/<provider>.json. An empty
@@ -185,7 +195,9 @@ public:
         engine_ = ainput_engine_new(&callbacks);
 
         output_ = std::make_unique<ainput::OutputHandler>(instance_, [this](const std::string &error) {
-            notify(error);
+            // Only reached when a newer dictation owns the input panel. The
+            // notification already carries "Ainput" as its title.
+            notify(error.rfind("Ainput: ", 0) == 0 ? error.substr(8) : error);
         });
 
         migrateLegacyConfig();
@@ -268,15 +280,7 @@ private:
     }
 
     void onError(uint64_t id, int32_t category, const char *detail) {
-        const std::string status =
-            ainput::statusForError(category, detail ? detail : "");
-        // Nothing to transcribe is not a failure: it stays in the panel and
-        // never becomes a desktop notification.
-        if (ainput::isNoResult(category)) {
-            output_->noResult(id, status);
-        } else {
-            output_->fail(id, status);
-        }
+        output_->fail(id, ainput::statusForError(category, detail ? detail : ""));
     }
 
     void onStage(uint64_t id, int32_t stage) {
@@ -302,6 +306,8 @@ private:
         settings.lufs_target = config_.lufsTarget.value();
         settings.speex_level = config_.speexLevel.value();
         settings.crest_threshold = config_.crestThreshold.value();
+        settings.min_active_ms = config_.minActiveMsec.value();
+        settings.lufs_margin = config_.lufsMargin.value();
         settings.qwen_api_key = config_.qwenApiKey.value().c_str();
         settings.qwen_model = config_.qwenModel.value().c_str();
         settings.doubao_api_key = config_.doubaoApiKey.value().c_str();
@@ -339,6 +345,8 @@ private:
         config_.lufsTarget.setValue(legacy.lufs_target);
         config_.speexLevel.setValue(legacy.speex_level);
         config_.crestThreshold.setValue(legacy.crest_threshold);
+        config_.minActiveMsec.setValue(legacy.min_active_ms);
+        config_.lufsMargin.setValue(legacy.lufs_margin);
         fcitx::safeSaveAsIni(config_, fcitx::StandardPathsType::PkgConfig, "conf/ainput.conf");
 
         // Rename rather than delete: the values are now in fcitx5's config,

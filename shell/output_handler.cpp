@@ -73,14 +73,6 @@ void OutputHandler::fail(uint64_t recognitionId, const std::string &text) {
     }
 }
 
-void OutputHandler::noResult(uint64_t recognitionId, const std::string &text) {
-    if (recognitionId == 0) {
-        showGlobalStatus(text);
-    } else {
-        enqueue({text, Kind::NoResult, recognitionId});
-    }
-}
-
 void OutputHandler::showStatus(uint64_t recognitionId, const std::string &text) {
     enqueue({text, Kind::Status, recognitionId});
 }
@@ -161,18 +153,15 @@ void OutputHandler::showStatusNow(const fcitx::ICUUID &uuid,
 void OutputHandler::commitPending(const Results::Entry &entry) {
     const auto &pending = *entry.outcome;
     if (pending.kind == Kind::Error) {
-        // A later commit can clear the panel in this same event-loop callback.
-        reportError_(pending.text);
-        if (!targets_.hasNewer(entry.id, entry.context)) showStatusNow(entry.context, pending.text);
-        FCITX_INFO() << "Ainput: id=" << entry.id << " stage=error_reported";
-        return;
-    }
-    if (pending.kind == Kind::NoResult) {
-        // Not a failure, so no notification: the panel carries it, and a
-        // newer dictation in the same context legitimately takes the panel
-        // over. The journal still has the reason.
-        if (!targets_.hasNewer(entry.id, entry.context)) showStatusNow(entry.context, pending.text);
-        FCITX_INFO() << "Ainput: id=" << entry.id << " stage=no_result";
+        if (targets_.hasNewer(entry.id, entry.context)) {
+            // A newer dictation in this context owns the panel and may be
+            // recording: its live status must stay, so report off the panel.
+            reportError_(pending.text);
+            FCITX_INFO() << "Ainput: id=" << entry.id << " stage=error_notified";
+            return;
+        }
+        showStatusNow(entry.context, pending.text);
+        FCITX_INFO() << "Ainput: id=" << entry.id << " stage=error_shown";
         return;
     }
     auto *ic = instance_->inputContextManager().findByUUID(entry.context);

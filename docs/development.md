@@ -64,10 +64,10 @@ touching capture, the queue, or the callback plumbing.
 
 Meson also builds three C++ tests when the target can run executables:
 `delivery-order` (per-context FIFO), `status-text` (one panel sentence per
-error category, and which outcomes are not failures) and
-`terminal-error-delivery`, which embeds a real fcitx5 event loop and checks
-that a failure is reported even when a later success is delivered in the same
-callback, while an outcome with nothing to transcribe reaches the panel only.
+error category) and `terminal-error-delivery`, which embeds a real fcitx5
+event loop with two input contexts: an outcome that arrives during a newer
+recording goes to the notification callback without touching the live
+status, and with nothing in flight it is shown in the panel.
 
 Unit coverage by area:
 
@@ -79,7 +79,8 @@ Unit coverage by area:
 | `asr::mod` | registry order, every descriptor creates a provider |
 | `config` | comment stripping (offset preserving), schema suggestions, type and required checks, tilde expansion |
 | `templates` | every template parses, passes its schema, and lists every field |
-| `dsp` | post-denoise activity, quiet recordings, SpeexDSP delay and error handling, concurrent denoisers, resampling, trimming |
+| `dsp` | post-denoise activity, configurable active time, the loudness gate and both premises it needs (a denoiser, a recording R128 could measure), quiet recordings, SpeexDSP delay and error handling, concurrent denoisers, resampling, trimming |
+| `settings` | defaults and clamps of every bounded option, the speech-gate parameters passed through unchanged |
 | `wav` | round trip, rejection of non-WAV input |
 | `engine` | queue limit, provider selection, cancellation, deadline recovery, final WAV validation and real microphone callback (ignored) |
 | `uinput` | ioctl numbers are derived, not hard-coded |
@@ -129,12 +130,17 @@ For audio below the R128 measurement gate or shorter than its 400 ms window,
 normalization falls back to RMS. Gain is capped at 1000x and limited by the
 input peak to avoid clipping. Low-level background noise is amplified too.
 The captured samples enter normalization as recorded. After denoising, each
-20 ms frame is scored by RMS variation around its mean. At least 250 ms of
-frames must meet the 64-count RMS floor (about −54 dBFS). Setting
-`CrestThreshold=0` skips the additional crest and VAD checks. In this mode,
-sustained noise can still pass the activity check. The normal journal logs
-input and output peak, measured loudness, gain, peak frame RMS, active time,
-gate result and denoiser. These entries contain no audio.
+20 ms frame is scored by RMS variation around its mean. At least
+`MinActiveMsec` (250) of frames must meet the 64-count RMS floor (about
+−54 dBFS). With a denoiser enabled, the integrated loudness of the denoised
+audio must also stay within `LufsMargin` (5) LUFS of `LufsTarget`; the check
+is skipped without a denoiser and when R128 could not measure the recording.
+Setting `CrestThreshold=0` skips the additional crest and VAD checks. In this
+mode, sustained noise can still pass the activity check. The normal journal
+logs input and output peak, the loudness before and after denoising, gain,
+peak frame RMS, active time, the gate parameters, gate result and denoiser.
+These entries contain no audio. The default loudness margin and its limits
+were measured through `dsp::preprocess`; see `found.md` #39.
 An exactly constant capture cannot contain audio activity. It still runs
 through normalization and denoising, but artifacts from that processing do
 not qualify it for recognition.

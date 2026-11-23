@@ -80,8 +80,13 @@ When nothing is transcribed, the panel says where that was decided:
 `no speech detected locally; audio was not sent` (the built-in speech gate
 rejected the recording), `no speech recognized by the ASR backend` (the audio
 was processed and contained no speech), or `ASR backend did not respond`
-(network error or timeout). These stay in the panel; only failures also raise
-a desktop notification.
+(network error or timeout).
+
+Every outcome is reported in that panel, which belongs to the newest dictation.
+An outcome that arrives while a later dictation is still recording or
+recognizing in the same window is raised as a desktop notification instead, so
+the live status stays visible. Otherwise, desktop notifications are used only
+for the provider and denoiser switch.
 
 ## ASR backends
 
@@ -182,6 +187,14 @@ lock state is not restored.
 the addon is enabled and the provider has a valid key. Each failure path has
 its own message (`fill api_key in ...`, `API key rejected`, `network error`,
 `recognition timed out`, ...).
+
+**`no speech detected locally; audio was not sent`.** The speech gate
+rejected the recording before it left the machine. The `Ainput: id=... audio
+...` line of that recording in the fcitx5 journal shows what the gate
+compared: `active_ms` against `MinActiveMsec`, and `denoised_lufs` against
+`LufsTarget` minus `LufsMargin`. Raise the limit that rejected your speech;
+see the speech gate section of
+[`docs/configuration.md`](docs/configuration.md).
 
 **Recognition queue full.** At most three recordings are accepted at once.
 Wait for `recognizing...` to finish.

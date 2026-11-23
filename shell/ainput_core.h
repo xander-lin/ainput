@@ -46,6 +46,11 @@ typedef struct {
     double lufs_target;
     int32_t speex_level;
     double crest_threshold;
+    // Speech gate, after normalization and denoising: the minimum total
+    // time of active audio, and how far below lufs_target the denoised audio
+    // may fall and still count as speech (0 disables the loudness check).
+    int32_t min_active_ms;
+    double lufs_margin;
 
     // Credentials and model ids set in fcitx5-configtool. NULL or empty means
     // "not set here": the provider then uses its JSON file.

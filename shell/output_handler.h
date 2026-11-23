@@ -32,10 +32,17 @@ enum class Stage {
 ///
 /// A result is delivered only to the original input context. If that context
 /// is gone, the drop is logged without recording the text.
+///
+/// The input panel is the primary channel and belongs to the newest
+/// dictation of its input context: its live status ("listening...",
+/// "recognizing...") must not be overwritten. An older dictation's terminal
+/// outcome that arrives while a newer one is outstanding therefore goes to
+/// ReportError instead of the panel.
 class OutputHandler {
 public:
-    /// Called once for every failure, independently of what the input panel
-    /// happens to show at that moment.
+    /// Called for a terminal outcome that cannot be shown in the input panel
+    /// because a newer dictation in the same input context owns it. The addon
+    /// routes it to the desktop notification.
     using ReportError = std::function<void(const std::string &)>;
 
     OutputHandler(fcitx::Instance *instance, ReportError reportError);
@@ -48,11 +55,9 @@ public:
     void rememberTarget(uint64_t recognitionId);
 
     void submit(uint64_t recognitionId, const std::string &text);
+    /// Terminal outcome without text: shown in the input panel, or reported
+    /// through ReportError when a newer dictation owns the panel.
     void fail(uint64_t recognitionId, const std::string &text);
-    /// Terminal outcome that is not a failure: the recording had nothing to
-    /// transcribe. It releases the delivery slot like an error, but is never
-    /// passed to ReportError, so it does not become a desktop notification.
-    void noResult(uint64_t recognitionId, const std::string &text);
     void showStatus(uint64_t recognitionId, const std::string &text);
     void showStage(uint64_t recognitionId, Stage stage);
 
@@ -70,8 +75,7 @@ private:
     int wakePipe_[2] = {-1, -1};
     std::unique_ptr<fcitx::EventSourceIO> wakeWatcher_;
 
-    /// `NoResult` is terminal like `Error` but is not reported as one.
-    enum class Kind { Status, Text, Error, NoResult };
+    enum class Kind { Status, Text, Error };
     struct Pending {
         std::string text;
         Kind kind;

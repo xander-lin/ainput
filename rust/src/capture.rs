@@ -273,14 +273,19 @@ pub(crate) fn finish_recording(
         settings.denoise,
         settings.lufs_target,
         settings.speex_level,
-        settings.crest_threshold,
+        settings.gate(),
         cancel,
     )?;
     let output_peak = samples.iter().map(|&s| (s as i32).abs()).max().unwrap_or(0);
+    // loudness_lufs is the capture before normalization; denoised_lufs is
+    // what the gate compared against lufs_target - lufs_margin (-inf when
+    // there was no denoiser or the recording was too short or quiet to
+    // measure, in which case the loudness gate is skipped).
     eprintln!(
-        "Ainput: id={recognition_id} audio input_peak={} output_peak={output_peak} loudness_lufs={:.1} gain={:.2} peak_frame_rms={:.1} active_ms={} crest_threshold={} voice={} denoise={}",
-        gated.input_peak, gated.loudness, gated.gain, gated.peak_frame_rms(), gated.active_ms(),
-        settings.crest_threshold, gated.voice, settings.denoise.as_str()
+        "Ainput: id={recognition_id} audio input_peak={} output_peak={output_peak} loudness_lufs={:.1} denoised_lufs={:.1} gain={:.2} peak_frame_rms={:.1} active_ms={} min_active_ms={} crest_threshold={} lufs_target={} lufs_margin={} voice={} denoise={}",
+        gated.input_peak, gated.loudness, gated.output_loudness, gated.gain, gated.peak_frame_rms(), gated.active_ms(),
+        settings.min_active_ms, settings.crest_threshold, settings.lufs_target, settings.lufs_margin,
+        gated.voice, settings.denoise.as_str()
     );
 
     if gated.input_peak == 0 {

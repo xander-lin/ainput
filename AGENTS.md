@@ -84,8 +84,16 @@ who want fast push-to-talk dictation without leaving the keyboard.
 - Status text says where an outcome was decided. `NoSpeech` comes only from
   the local speech gate (nothing was sent); a backend that processed the
   audio and returned no text is `EmptyResult`, whatever HTTP status the
-  vendor used. Desktop notifications are for failures and for the provider /
-  denoiser switch only; "nothing to transcribe" stays in the input panel.
+  vendor used.
+- The input panel is the primary channel and belongs to the newest dictation
+  of its input context. Desktop notifications are used in exactly two cases:
+  always for the provider / denoiser switch, and for any other outcome that
+  arrives while a newer dictation owns the panel.
+- Speech-gate thresholds are file-only options (`MinActiveMsec`, `LufsMargin`,
+  `CrestThreshold`): they only matter when speech is rejected or noise is
+  sent. A new threshold needs a measurement through `dsp::preprocess` on real
+  speech, recorded with the denoiser it was measured on, and the journal must
+  print the value it compared (`found.md` #39).
 - Documentation is one file per topic, not one file per phase of work:
   - `README.md` (English) / `README.zh-CN.md` (Chinese) — project introduction,
     install, usage, provider table, quick config. Keep engineering detail out;

@@ -19,13 +19,17 @@ public:
 
     const char *frontend() const override { return "ainput-test"; }
     std::vector<std::string> commits;
-    /// Runs inside commitStringImpl, so it observes the delivery queue as
-    /// this commit leaves it.
+    /// Panel text at the moment of each commit, i.e. before the delivery
+    /// code reacts to it.
+    std::vector<std::string> panelAtCommit;
     std::function<void()> onCommit;
+
+    std::string panelText() const { return inputPanel().auxUp().toString(); }
 
 protected:
     void commitStringImpl(const std::string &text) override {
         commits.push_back(text);
+        panelAtCommit.push_back(panelText());
         if (onCommit) onCommit();
         eventLoop_.exit();
     }
@@ -41,6 +45,8 @@ void check(bool condition) {
     if (!condition) std::abort();
 }
 
+using Texts = std::vector<std::string>;
+
 } // namespace
 
 int main() {
@@ -48,38 +54,55 @@ int main() {
     char disable[] = "--disable=all";
     char *args[] = {name, disable, nullptr};
     fcitx::Instance instance(2, args);
+    // Focus only after initialize(): the input-context property factory is
+    // registered there (found.md #35).
     instance.initialize();
-    TestContext context(instance);
-    context.focusIn();
-    check(instance.mostRecentInputContext() == &context);
 
-    std::vector<std::string> errors;
+    // One input context where an older dictation fails while a newer one is
+    // recording, and one where a dictation fails with nothing else in flight.
+    TestContext duringRecording(instance);
+    TestContext idle(instance);
+
+    std::vector<std::string> notifications;
     ainput::OutputHandler output(&instance, [&](const std::string &error) {
-        errors.push_back(error);
+        notifications.push_back(error);
     });
     std::vector<size_t> pendingAtCommit;
-    context.onCommit = [&] { pendingAtCommit.push_back(output.pendingCount()); };
+    duringRecording.onCommit = [&] { pendingAtCommit.push_back(output.pendingCount()); };
 
-    // Job 1 failed after job 2 had already finished, job 3 is still recording
-    // and job 4 has nothing to transcribe. All of it is drained in one
-    // event-loop callback.
+    duringRecording.focusIn();
+    check(instance.mostRecentInputContext() == &duringRecording);
     output.rememberTarget(1);
     output.rememberTarget(2);
-    output.rememberTarget(3);
-    output.rememberTarget(4);
-    output.submit(2, "second");
+    duringRecording.focusOut();
+    idle.focusIn();
+    check(instance.mostRecentInputContext() == &idle);
+    output.rememberTarget(5);
+
+    // Dictation 2 is recording and owns the panel of its input context when
+    // dictation 1 fails. Dictation 5 fails with nothing else in flight.
+    output.showStatus(2, "listening...");
     output.fail(1, "first failed");
-    output.noResult(4, "no speech detected");
-    output.submit(3, "third");
+    output.fail(5, "fifth failed");
+    // Then the recording finishes. Everything is drained in one callback.
+    output.submit(2, "second");
     instance.eventLoop().exec();
 
-    // The failure is reported even though a later success is delivered in the
-    // same callback. The no-result outcome is not a failure, so it is not.
-    check(errors == std::vector<std::string>{"first failed"});
-    check(context.commits == std::vector<std::string>{"second", "third"});
-    // Jobs 3 and 4 hold their slots until 3, the older one, has an outcome.
-    check(pendingAtCommit == std::vector<size_t>{2, 0});
-    // Nothing to transcribe is shown in the panel instead.
-    check(context.inputPanel().auxUp().toString() == "no speech detected");
+    // The failure that could not reach its panel went to the notification
+    // channel; it is the only one that did.
+    check(notifications == Texts{"first failed"});
+
+    // The live status survived until the text was committed, then the panel
+    // was cleared.
+    check(duringRecording.commits == Texts{"second"});
+    check(duringRecording.panelAtCommit == Texts{"listening..."});
+    check(duringRecording.panelText().empty());
+
+    // With nothing else in flight, a failure simply goes to the panel.
+    check(idle.commits.empty());
+    check(idle.panelText() == "fifth failed");
+
+    // Dictation 2 held its slot until it was delivered.
+    check(pendingAtCommit == std::vector<size_t>{0});
     check(output.pendingCount() == 0);
 }

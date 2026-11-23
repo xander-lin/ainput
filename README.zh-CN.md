@@ -73,8 +73,11 @@ fcitx5 -r
 没有文本上屏时，面板会指出是在哪一步决定的：`no speech detected locally;
 audio was not sent`（内置语音门限在本地拦截，录音没有发出）、`no speech
 recognized by the ASR backend`（后端处理了音频，但没有识别到语音）或
-`ASR backend did not respond`（网络错误或超时）。这些只显示在面板里；只有
-真正的失败才会另外弹出桌面通知。
+`ASR backend did not respond`（网络错误或超时）。
+
+所有结果都显示在这个面板里，面板属于最新的那次听写：如果一条结果到达时，
+同一窗口里还有更新的听写正在录音或识别，这条结果会改为弹出桌面通知，以免
+盖掉实时状态。除此之外，桌面通知只用于切换识别后端和切换降噪器。
 
 ## 识别后端
 
@@ -168,6 +171,13 @@ fcitx5 -r
 **面板没有任何反应。** 查看 fcitx5 日志里 `Ainput` 的输出，确认插件已启用且
 后端 key 有效。每种失败都有自己的提示（`fill api_key in ...`、
 `API key rejected`、`network error`、`recognition timed out` 等）。
+
+**提示 `no speech detected locally; audio was not sent`。** 语音门限在本地
+拦下了这次录音，音频没有发出。fcitx5 日志里该次录音的 `Ainput: id=...
+audio ...` 那一行列出了门限比较过的数值：`active_ms` 对应
+`MinActiveMsec`，`denoised_lufs` 对应 `LufsTarget` 减去 `LufsMargin`。
+调高拦住你语音的那一项，说明见
+[`docs/configuration.md`](docs/configuration.md) 的语音门限一节。
 
 **提示 recognition queue full。** 同时最多接受 3 次录音，等
 `recognizing...` 结束即可。

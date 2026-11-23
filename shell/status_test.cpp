@@ -41,18 +41,7 @@ int main() {
     check(contains(timeout, "did not respond") && contains(timeout, "recognition timed out"));
     check(network != timeout && network != backend && network != local);
 
-    // Only "nothing to transcribe" is kept out of the desktop notification.
-    check(ainput::isNoResult(AINPUT_ERR_NO_SPEECH));
-    check(ainput::isNoResult(AINPUT_ERR_EMPTY_RESULT));
-    for (const int32_t category :
-         {AINPUT_ERR_CONFIG_MISSING, AINPUT_ERR_CONFIG_INVALID, AINPUT_ERR_AUTH_REJECTED,
-          AINPUT_ERR_MODEL_NOT_FOUND, AINPUT_ERR_LOCAL_SETUP, AINPUT_ERR_INVALID_REQUEST,
-          AINPUT_ERR_NETWORK, AINPUT_ERR_SERVICE_UNAVAILABLE, AINPUT_ERR_TIMEOUT,
-          AINPUT_ERR_AUDIO_DATA, AINPUT_ERR_RUNTIME, AINPUT_ERR_UNKNOWN}) {
-        check(!ainput::isNoResult(category));
-    }
-
-    // Every category has exactly one prefixed sentence.
+    // Every outcome has exactly one prefixed sentence.
     for (int32_t category = AINPUT_ERR_CONFIG_MISSING; category <= AINPUT_ERR_UNKNOWN;
          ++category) {
         check(ainput::statusForError(category, "detail").rfind("Ainput: ", 0) == 0);
