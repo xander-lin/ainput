@@ -1265,3 +1265,25 @@
   the package it conflicts with (`bsdtar -tf` of the built package,
   `pacman -Ql` of the installed one). A package built from an install image
   needs everything the other package adds by hand.
+
+## 49. A test build rewrote the PKGBUILD that was then pushed to AUR (found 2026-11)
+
+- **Mistake/context.** The `-git` AUR repository received a `PKGBUILD`
+  whose placeholder read `pkgver=0.1.2.r202.f968039`, while its `.SRCINFO`
+  and the repository's own `PKGBUILD` said `0.1.2.r200.89b32a4`. The AUR
+  page listed one version and the build script carried another. The 0.1.1
+  push has the same shape: `r193.2d215e3` in AUR, `r192.b3dd702` in the
+  repository.
+- **Root cause.** pacman 7.1's `makepkg` runs `pkgver()` and writes the
+  result back into the `PKGBUILD` it reads (`update_pkgver`). The test
+  build that the release steps ask for had run in the AUR clone, and the
+  file was committed afterwards. It had been compared with the
+  repository's copy before the build, which made the later commit look
+  verified.
+- **Correction.** A second AUR commit restored the placeholder. Both AUR
+  repositories were then cloned again and their `PKGBUILD`, `.SRCINFO` and
+  `PKGBUILD.install` compared with the repository's files.
+- **Prevention.** Compare every file of an AUR clone with the repository's
+  copy after the test build, immediately before `git add`: a tool that
+  reads a file may write it. Build a `-git` package from a scratch copy,
+  not from the clone that will be pushed.

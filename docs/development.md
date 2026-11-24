@@ -282,6 +282,12 @@ and `provides=(fcitx5-ainput)`. Only one can be installed.
    (`<version>.r<count>.<commit>`) and regenerate its `.SRCINFO` before
    pushing to the `-git` AUR repo.
 
+`makepkg` runs `pkgver()` and writes the result back into the `PKGBUILD` it
+reads, so a test build in an AUR clone changes the placeholder. Right before
+`git add`, compare every file of the clone with the repository's copy
+(`diff`), and build a `-git` package from a scratch copy instead
+(`found.md` #49).
+
 The release URL uses the tag verbatim (`/releases/download/<version>/`). A
 `v` prefix there produces a 404 that only shows up when building the package
 from the published release, never from a local copy of the artifact.
