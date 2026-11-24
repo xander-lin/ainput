@@ -103,7 +103,7 @@ pub struct Settings {
     /// speech. Default 250 ms; one 20 ms frame is the smallest useful value.
     pub min_active_ms: i32,
     /// How far below `lufs_target` the denoised audio may fall and still
-    /// count as speech. Default 5 LUFS; 0 disables the loudness gate.
+    /// count as speech. Default 4.2 LUFS; 0 disables the loudness gate.
     pub lufs_margin: f64,
     pub credentials: Credentials,
 }
@@ -280,7 +280,7 @@ mod tests {
     fn speech_gate_defaults_and_clamps() {
         let settings = Settings::default();
         assert_eq!(settings.min_active_ms, 250);
-        assert_eq!(settings.lufs_margin, 5.0);
+        assert_eq!(settings.lufs_margin, 4.2);
         assert_eq!(settings.gate(), crate::dsp::Gate::with_crest(2.4));
 
         let with = |min_active_ms, lufs_margin| {

@@ -1009,9 +1009,12 @@
   | white noise alone | 5.2–5.3 LU |
   | brown noise alone | 4.9–5.0 LU |
 
-  At the default 5 LUFS margin, speech passes down to 0 dB SNR with about
-  2 LU to spare, speech at −10 dB lands on the margin (10 of 11 clips still
-  passed), white noise is rejected by 0.2 LU, and brown noise passes.
+  At a 5 LUFS margin, speech passes down to 0 dB SNR with about 2 LU to
+  spare, speech at −10 dB lands on the margin (10 of 11 clips still pass),
+  white noise is rejected by 0.2 LU, and brown noise passes. The default was
+  therefore set to 4.2 LUFS: on the same table the accepted side (speech at
+  0 dB or better) stays at least 1.3 LU inside the margin and the rejected
+  side (speech at −10 dB, white and brown noise) at least 0.6 LU outside.
 - **Why the criterion is narrow.** SpeexDSP barely separates noise from
   noisy speech. The denoised loudness of noise alone sits 5.2 LU below the
   target at `SpeexLevel=-15`, but 2.3–2.5 LU at −25 and below, while its

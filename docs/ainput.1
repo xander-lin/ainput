@@ -97,7 +97,7 @@ none, speexdsp or deepfilter. deepfilter needs a helper binary at
 ~/.local/share/ainput/bin/deep-filter.
 .PP
 \fBBufferMs\fP (20), \fBLufsTarget\fP (-16), \fBSpeexLevel\fP (-15),
-\fBCrestThreshold\fP (2.4), \fBMinActiveMsec\fP (250) and \fBLufsMargin\fP (5)
+\fBCrestThreshold\fP (2.4), \fBMinActiveMsec\fP (250) and \fBLufsMargin\fP (4.2)
 are written to the file but hidden from the settings dialog: they are
 pipeline details rather than choices a user needs to make. Deleting the file
 and restarting fcitx5 regenerates it with every option and its default
@@ -178,7 +178,7 @@ PulseAudio capture
 A recording must pass every speech-gate check to be sent to a backend. At
 least \fBMinActiveMsec\fP (250) of 20 ms frames whose variation reaches 64
 counts are required. With a denoiser enabled, the loudness after denoising
-must stay within \fBLufsMargin\fP (5) LUFS of \fBLufsTarget\fP: speech
+must stay within \fBLufsMargin\fP (4.2) LUFS of \fBLufsTarget\fP: speech
 survives the denoiser nearly unchanged and noise does not. \fBCrestThreshold\fP
 (2.4) adds a crest and a VAD check; \fB0\fP skips both, and \fBLufsMargin=0\fP
 skips the loudness check. The fcitx5 journal reports the measured values of

@@ -37,7 +37,7 @@ should be asked to make:
 | `LufsTarget` | `-16.0` | Loudness normalization target in LUFS | *file only* |
 | `SpeexLevel` | `-15` | speexdsp suppression strength in dB | *file only* |
 | `MinActiveMsec` | `250` | Minimum total time of active audio for a recording to count as speech (20–10000 ms) | *file only* |
-| `LufsMargin` | `5.0` | How far below `LufsTarget` the denoised audio may fall and still count as speech, in LUFS. `0` disables the check | *file only* |
+| `LufsMargin` | `4.2` | How far below `LufsTarget` the denoised audio may fall and still count as speech, in LUFS. `0` disables the check | *file only* |
 | `CrestThreshold` | `2.4` | Optional crest and VAD checks after denoising. `0` skips both checks. | *file only* |
 
 fcitx5 only writes options that differ from their default, so the file stays
@@ -146,11 +146,11 @@ the result. Compare them to see which check failed, then raise that limit.
 `denoised_lufs=-inf` means the loudness check was skipped: no denoiser was
 enabled, or R128 could not measure the recording.
 
-The default margin was measured with speexdsp at `SpeexLevel=-15`: speech
-passed down to 0 dB signal-to-noise ratio with about 2 LU to spare, speech at
-−10 dB was borderline, and stationary noise fell just past the margin. The
-distance between noise and the margin is small and it moves with
-`SpeexLevel`, so treat the loudness check as a way to drop clearly silent
+The default margin was chosen on a measurement with speexdsp at
+`SpeexLevel=-15`: speech down to 0 dB signal-to-noise ratio stayed at least
+1.3 LU inside it, while speech at −10 dB and both kinds of stationary noise
+fell at least 0.6 LU outside. The distance is small and it moves with
+`SpeexLevel`, so treat the loudness check as a way to drop noisy and silent
 recordings, not as a noise classifier. See `found.md` #39.
 
 ## Provider files

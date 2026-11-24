@@ -133,7 +133,7 @@ The captured samples enter normalization as recorded. After denoising, each
 20 ms frame is scored by RMS variation around its mean. At least
 `MinActiveMsec` (250) of frames must meet the 64-count RMS floor (about
 −54 dBFS). With a denoiser enabled, the integrated loudness of the denoised
-audio must also stay within `LufsMargin` (5) LUFS of `LufsTarget`; the check
+audio must also stay within `LufsMargin` (4.2) LUFS of `LufsTarget`; the check
 is skipped without a denoiser and when R128 could not measure the recording.
 Setting `CrestThreshold=0` skips the additional crest and VAD checks. In this
 mode, sustained noise can still pass the activity check. The normal journal

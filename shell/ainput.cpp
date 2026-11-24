@@ -151,7 +151,7 @@ FCITX_CONFIGURATION(
     fcitx::HiddenOption<double, fcitx::NoConstrain<double>, fcitx::DoubleMarshaller> lufsMargin{
         this, "LufsMargin",
         "How far below LufsTarget denoised audio may fall and still count as speech (LUFS, 0 disables)",
-        5.0};
+        4.2};
 
     // ---- credentials and model ids ----
     // These override the values in ~/.config/ainput/<provider>.json. An empty

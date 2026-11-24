@@ -17,7 +17,7 @@ const MIN_FRAME_RMS: f64 = 64.0; // about -54 dBFS
 /// Default `Gate::min_active_ms`.
 pub const DEFAULT_MIN_ACTIVE_MS: i32 = 250;
 /// Default `Gate::lufs_margin`.
-pub const DEFAULT_LUFS_MARGIN: f64 = 5.0;
+pub const DEFAULT_LUFS_MARGIN: f64 = 4.2;
 
 /// EBU R128 integrated loudness in LUFS. Negative infinity when nothing is
 /// loud enough to measure: the absolute gate sits at -70 LUFS and one
@@ -781,12 +781,12 @@ mod tests {
         };
 
         // Speech that survives denoising: about 1 LU below the target.
-        let kept = run(0.9, 5.0);
+        let kept = run(0.9, DEFAULT_LUFS_MARGIN);
         assert!(kept.voice);
         assert!((kept.output_loudness - (-16.0 + 20.0 * 0.9f64.log10())).abs() < 0.5);
 
         // 6 LU below the target is past the default margin...
-        let dropped = run(0.5, 5.0);
+        let dropped = run(0.5, DEFAULT_LUFS_MARGIN);
         assert!(!dropped.voice);
         // ...but inside a wider one, and not checked at all when it is off.
         assert!(run(0.5, 7.0).voice);
