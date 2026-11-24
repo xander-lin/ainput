@@ -89,10 +89,10 @@ who want fast push-to-talk dictation without leaving the keyboard.
   the local speech gate (nothing was sent); a backend that processed the
   audio and returned no text is `EmptyResult`, whatever HTTP status the
   vendor used.
-- The input panel is the primary channel and belongs to the newest dictation
-  of its input context. Desktop notifications are used in exactly two cases:
-  always for the provider / denoiser switch, and for any other outcome that
-  arrives while a newer dictation owns the panel.
+- The input panel is the primary channel. A displayed recording or recognition
+  status is not preemptible; another terminal outcome then goes to a desktop
+  notification. Other panel messages replace one another only after 100 ms.
+  Notifications are otherwise used only for the provider / denoiser switch.
 - Speech-gate thresholds are file-only options (`MinActiveMsec`, `LufsMargin`,
   `CrestThreshold`): they only matter when speech is rejected or noise is
   sent. A new threshold needs a measurement through `dsp::preprocess` on real

@@ -60,12 +60,12 @@ CapsLock release
   -> on_text / on_error → OutputHandler → in-order delivery per input context
 ```
 
-The input panel is the primary channel for every outcome, and it belongs to
-the newest dictation of its input context: its live status must not be
-overwritten. A terminal outcome that arrives while a newer dictation is still
-outstanding in the same context therefore goes to the desktop notification
-instead of the panel. That is the only use of notifications apart from the
-provider and denoiser switch, which always notify.
+The input panel is the primary channel for every outcome. A displayed running
+status is not preemptible, so a terminal outcome that arrives while it is
+visible goes to the desktop notification instead of hiding it. Other panel
+messages can replace one another only after the current message has been
+visible for at least 100 ms. That is the only use of notifications apart from
+the provider and denoiser switch, which always notify.
 
 `Ctrl+CapsLock` enters switch mode without recording. `←/→` or `h/l` change the
 backend, `↑/↓` or `k/j` change the denoiser. Both are written to
@@ -171,7 +171,7 @@ reported to the user. There is no third option.
 | Local speech gate rejects the recording | panel: `no speech detected locally; audio was not sent` |
 | Backend processed the audio, no text | panel: `no speech recognized by the ASR backend` |
 | Any other failure | panel: one sentence per category |
-| Any terminal outcome while a newer dictation owns the panel | desktop notification, so the live status stays |
+| Any terminal outcome while a running status owns the panel | desktop notification, so the live status stays |
 | Input context gone before commit | result is discarded and the recording ID is logged |
 | `/dev/uinput` unavailable | one warning naming the udev rule; voice input still works |
 | Queue full | `recognition queue full; try again`, newest recording discarded |

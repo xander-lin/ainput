@@ -68,11 +68,12 @@ Meson also builds five C++ tests when the target can run executables:
 error category), `config-file` (every option is written as an active line,
 and an old-style file is told apart from a complete one),
 `terminal-error-delivery`, which embeds a real fcitx5 event loop with two
-input contexts: an outcome that arrives during a newer recording goes to the
-notification callback without touching the live status, and with nothing in
-flight it is shown in the panel; and `addon-config-file`, which loads the
-real addon into an embedded fcitx5 instance under a temporary `HOME` and
-checks the configuration file it writes on a first start and on an upgrade.
+input contexts: an outcome that arrives while a running status owns the panel
+goes to the notification callback, while panel errors stay visible for at
+least 100 ms before a following message or result replaces them; and
+`addon-config-file`, which loads the real addon into an embedded fcitx5
+instance under a temporary `HOME` and checks the configuration file it writes
+on a first start and on an upgrade.
 
 Unit coverage by area:
 

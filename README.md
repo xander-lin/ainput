@@ -82,11 +82,11 @@ rejected the recording), `no speech recognized by the ASR backend` (the audio
 was processed and contained no speech), or `ASR backend did not respond`
 (network error or timeout).
 
-Every outcome is reported in that panel, which belongs to the newest dictation.
-An outcome that arrives while a later dictation is still recording or
-recognizing in the same window is raised as a desktop notification instead, so
-the live status stays visible. Otherwise, desktop notifications are used only
-for the provider and denoiser switch.
+Every outcome prefers that panel. A live recording or recognition status cannot
+be replaced: an outcome that arrives while it is visible is raised as a
+desktop notification instead. Other panel messages replace one another only
+after the current message has been visible for at least 100 ms. Otherwise,
+desktop notifications are used only for the provider and denoiser switch.
 
 ## ASR backends
 

@@ -947,8 +947,8 @@
   Every backend answer without text, including Qwen's HTTP 400
   `ASR_RESPONSE_HAVE_NO_WORDS` and Doubao `20000003`, is `EmptyResult`.
   The panel is the primary channel and belongs to the newest dictation of
-  its input context. A terminal outcome that arrives while a newer dictation
-  is outstanding there is notified at once: it cannot wait, and showing it
+  its input context. A terminal outcome that arrives while a running status
+  is displayed there is notified at once: it cannot wait, and showing it
   would overwrite the live status. Nothing else notifies apart from the
   provider and denoiser switch. The core writes its raw description to the
   journal before reporting an error.
@@ -965,6 +965,31 @@
     first implementation invented a third rule, holding "nothing to
     transcribe" for the panel, which the product rule never asked for; the
     rule turned out to be two classes, and the holding code was removed.
+
+## 41. Panel ownership must be separate from result delivery order (found 2026-11)
+
+- **Mistake and context.** A terminal error used the presence of a newer
+  delivery-queue entry as a proxy for whether the input panel was occupied.
+  This sent errors to desktop notifications even when no running status was
+  displayed. Conversely, delivering a ready FIFO batch could remove newer
+  entries before an older outcome was rendered, allowing the following result
+  to clear that outcome in the same event-loop turn.
+- **Root cause.** FIFO delivery state and panel presentation state have
+  different lifetimes and priorities. Treating a queued dictation as panel
+  ownership, and updating the panel synchronously for every outcome, conflated
+  those two concerns.
+- **Correction.** Track the panel message per input context and classify it as
+  a running, non-preemptible status or a preemptible outcome. Outcomes arriving
+  while a running status is displayed use the system notification; other panel
+  messages are queued so each remains visible for at least 100 ms. A completed
+  text result clears the panel through the same dwell queue without clearing
+  another dictation's running status.
+- **Prevention.** Test three separate cases: an outcome during a visible live
+  status goes to notifications without changing the panel; an idle-panel error
+  remains visible through a following text commit; and queued panel outcomes
+  are not replaced before their 100 ms minimum. Do not infer UI ownership from
+  the delivery queue's outstanding-entry count. Specify time-source accuracy:
+  sd-event's default coalescing delayed a 100 ms timer beyond a 150 ms test.
 
 ## 38. The embedded fcitx5 event loop is run once per test process
 
@@ -1070,3 +1095,40 @@
     fcitxPath` takes a compile-time directory name, not a type; the user
     directory of a `StandardPathsType` is `userDirectory(type)`. Guessing
     cost a failed test run and a probe.
+
+## 42. A completed dictation left an older live status on the panel
+
+- **Mistake and context.** When two dictations in the same context completed
+  within the 100 ms display interval, the newer one's queued running status
+  could be removed before display while the older running status remained
+  visible indefinitely. A newer failure could also be sent to a notification
+  because that stale status was incorrectly treated as still running.
+- **Root cause.** Panel ownership was retired only when ordered results were
+  delivered, and clearing checked the latest result's ID against an older
+  displayed status. Completion and FIFO delivery are separate events: a result
+  can also wait behind an older job after its own recognition has finished.
+- **Correction.** Retire a dictation's running status as soon as its terminal
+  outcome reaches the event loop, before ordered delivery. A displayed status
+  remains for its 100 ms minimum, but no longer blocks other outcomes; an
+  owner-checked clear cannot erase a different dictation's newer status.
+- **Prevention.** Test consecutive quick successes, a quick success followed by
+  an error, and a newer completed result buffered behind a slower older job.
+  Assert both the final panel text and notification routing, not only text
+  commit order. Preserve the 100 ms minimum during completion cleanup.
+
+## 43. Restarting fcitx5 from a short-lived command lost its log output
+
+- **Mistake and context.** After installing a local package, the agent ran
+  `fcitx5 -r -d` from a command whose captured output stream then closed. A
+  subsequent dictation aborted fcitx5; the core dump shows a Rust panic in
+  `std::io::stdio::__eprint` on an Ainput worker thread.
+- **Root cause.** The worker panicked while writing to standard error. The
+  exact OS error was not captured; the short-lived command's closed output
+  pipe is the likely cause, not a proven diagnosis.
+- **Correction.** Start fcitx5 as a transient user service via `systemd-run`
+  so its standard output and error remain connected to the journal. Confirm
+  that the service stays active and its log contains `Loaded addon ainput`.
+- **Prevention.** Do not daemonize fcitx5 with standard streams tied to an
+  agent tool invocation. Verify the process remains alive after the invoking
+  command exits, and investigate Rust `eprintln!` failure separately before
+  assuming logging can never affect capture.

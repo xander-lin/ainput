@@ -196,7 +196,7 @@ public:
         engine_ = ainput_engine_new(&callbacks);
 
         output_ = std::make_unique<ainput::OutputHandler>(instance_, [this](const std::string &error) {
-            // Only reached when a newer dictation owns the input panel. The
+            // Only reached when a running status owns the input panel. The
             // notification already carries "Ainput" as its title.
             notify(error.rfind("Ainput: ", 0) == 0 ? error.substr(8) : error);
         });

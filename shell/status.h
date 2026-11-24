@@ -38,7 +38,7 @@ inline std::string truncate(const std::string &text, std::size_t limit) {
 
 /// One actionable sentence per error category, i.e. per terminal outcome
 /// without text. Every one of them goes to the input panel, or to the
-/// desktop notification when a newer dictation owns the panel.
+/// desktop notification when a running status owns the panel.
 ///
 /// "Nothing was transcribed" says where that was decided, because the three
 /// cases call for different reactions:
