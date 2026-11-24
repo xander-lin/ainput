@@ -52,7 +52,9 @@ rust_core = custom_target('ainput_core_rust',
 )
 
 fcitx5_core = dependency('Fcitx5Core')
-fcitx5_config = dependency('Fcitx5Config')
+# RawConfig::setImplicit (shell/configfile.h, so that the configuration file
+# lists every option) exists since 5.1.22.
+fcitx5_config = dependency('Fcitx5Config', version: '>=5.1.22')
 fcitx5_module = dependency('Fcitx5Module')
 
 # Libraries the Rust archive references; they must be on the final link line.
@@ -96,6 +98,16 @@ test('rust-unit',
   timeout: 300)
 if meson.can_run_host_binaries()
   test('delivery-order', executable('delivery-queue-test', 'shell/delivery_queue_test.cpp'))
+  test('config-file', executable('config-file-test', 'shell/configfile_test.cpp',
+      dependencies: [fcitx5_config]))
+  # The real addon, started inside an embedded fcitx5 instance with an
+  # isolated HOME: what it writes to its configuration file on start.
+  test('addon-config-file', executable('addon-config-test',
+      ['shell/addon_config_test.cpp', 'shell/ainput.cpp',
+       'shell/output_handler.cpp'], rust_core,
+      dependencies: [fcitx5_core, fcitx5_config, fcitx5_module,
+        pulse, curl, ebur128, speexdsp, soxr]),
+      timeout: 60)
   test('status-text', executable('status-text-test', 'shell/status_test.cpp'))
   test('terminal-error-delivery', executable('output-handler-test',
     ['shell/output_handler_test.cpp', 'shell/output_handler.cpp'],

@@ -32,7 +32,11 @@ who want fast push-to-talk dictation without leaving the keyboard.
 - Configuration split (2026-10, Rust rewrite):
   - Shared settings (provider, key timing, denoise, audio tuning) live in
     fcitx5's own `Configuration`, so they appear in `fcitx5-configtool` and land
-    in `~/.config/fcitx5/conf/ainput.conf`. fcitx5 writes only non-defaults.
+    in `~/.config/fcitx5/conf/ainput.conf`. The addon writes every option
+    there with its current value, each under its description: it clears the
+    implicit flag fcitx5 puts on defaults (`shell/configfile.h`) and rewrites
+    the file once at start when an older version left defaults as comments.
+    The file-only options can only be found and changed there.
   - Per-provider data (credentials, model ids, endpoints, paths, timeouts) is
     `~/.config/ainput/<provider>.json`. Every file is seeded on first run with
     **all** fields, their defaults and English comments; a template that omits a

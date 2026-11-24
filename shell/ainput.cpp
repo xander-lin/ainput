@@ -43,6 +43,7 @@
 #include <vector>
 
 #include "ainput_core.h"
+#include "configfile.h"
 #include "output_handler.h"
 #include "periodic.h"
 #include "status.h"
@@ -201,6 +202,7 @@ public:
         });
 
         migrateLegacyConfig();
+        completeConfigFile();
         pushSettings();
         warnIfUinputUnavailable();
 
@@ -247,16 +249,38 @@ public:
 
     void setConfig(const fcitx::RawConfig &rawConfig) override {
         config_.load(rawConfig, true);
-        fcitx::safeSaveAsIni(config_, fcitx::StandardPathsType::PkgConfig, "conf/ainput.conf");
+        saveConfig();
         pushSettings();
     }
 
     void reloadConfig() override {
-        fcitx::readAsIni(config_, fcitx::StandardPathsType::PkgConfig, "conf/ainput.conf");
+        fcitx::readAsIni(config_, fcitx::StandardPathsType::PkgConfig, ainput::kConfigFile);
     }
 
     void save() override {
-        fcitx::safeSaveAsIni(config_, fcitx::StandardPathsType::PkgConfig, "conf/ainput.conf");
+        saveConfig();
+    }
+
+    /// Writes every option with its current value (see configfile.h).
+    void saveConfig() {
+        fcitx::safeSaveAsIni(ainput::completeConfig(config_),
+                             fcitx::StandardPathsType::PkgConfig, ainput::kConfigFile);
+    }
+
+    /// Makes sure the file exists in its complete form: on a first run, and
+    /// once after an upgrade that added options or still wrote defaults as
+    /// comments. Values already in the file are kept; they were just loaded.
+    void completeConfigFile() {
+        fcitx::RawConfig onDisk;
+        fcitx::readAsIni(onDisk, fcitx::StandardPathsType::PkgConfig, ainput::kConfigFile);
+        if (ainput::listsEveryOption(onDisk, config_)) {
+            return;
+        }
+        if (!fcitx::safeSaveAsIni(ainput::completeConfig(config_),
+                                  fcitx::StandardPathsType::PkgConfig, ainput::kConfigFile)) {
+            FCITX_WARN() << "Ainput: cannot write the complete configuration file; "
+                            "the options missing from it keep their defaults";
+        }
     }
 
 private:
@@ -347,7 +371,7 @@ private:
         config_.crestThreshold.setValue(legacy.crest_threshold);
         config_.minActiveMsec.setValue(legacy.min_active_ms);
         config_.lufsMargin.setValue(legacy.lufs_margin);
-        fcitx::safeSaveAsIni(config_, fcitx::StandardPathsType::PkgConfig, "conf/ainput.conf");
+        saveConfig();
 
         // Rename rather than delete: the values are now in fcitx5's config,
         // and a leftover config.json would be migrated again on every start,
@@ -427,13 +451,13 @@ private:
 
     void persistProvider(const std::string &id) {
         config_.provider.setValue(id);
-        fcitx::safeSaveAsIni(config_, fcitx::StandardPathsType::PkgConfig, "conf/ainput.conf");
+        saveConfig();
         pushSettings();
     }
 
     void persistDenoise(AinputDenoise value) {
         config_.denoise.setValue(value);
-        fcitx::safeSaveAsIni(config_, fcitx::StandardPathsType::PkgConfig, "conf/ainput.conf");
+        saveConfig();
         pushSettings();
     }
 

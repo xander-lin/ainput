@@ -1034,3 +1034,39 @@
     exactly −21.2 LUFS), check the probe before the pipeline: a missing
     scale factor had made the labelled SNR 30 dB too low, and the first
     table drawn from it was wrong.
+
+## 40. The only place a file-only option could be changed showed it commented out (found 2026-11)
+
+- **Mistake and context.** Seven of the fifteen shared options are
+  `HiddenOption`s: the configuration file is the only place they can be
+  seen or changed. But fcitx5's `Configuration::save` marks every option
+  that sits at its default as *implicit*, and the INI writer emits an
+  implicit option as a comment. A fresh `ainput.conf` therefore showed
+  `# MinActiveMsec=250`, and a user who wanted to change it had to know
+  that the key had to be uncommented first. `docs/configuration.md`
+  described the same file two ways: "fcitx5 only writes options that differ
+  from their default" near the top and "defaults as commented `#Key=value`
+  lines" further down. Neither was what a user opening the file needed.
+- **Root cause.** The addon handed its configuration to
+  `safeSaveAsIni(config_, ...)` and accepted fcitx5's format, which is
+  designed for options shown in the settings dialog. The file-only options
+  were added one at a time, each documented in a table, without anyone
+  reading the generated file as a user would.
+- **Correction.** `shell/configfile.h` clears the implicit flag on every
+  option before writing (`RawConfig::setImplicit(false)`, fcitx5 ≥ 5.1.22),
+  so the file lists all fifteen as active lines under their descriptions.
+  The addon rewrites the file once at start when an option is missing or
+  still commented, keeping the values already there. `addon-config-file`
+  loads the real addon into an embedded fcitx5 instance and reads the file
+  it writes on a first start and on an upgrade.
+- **Prevention.**
+  - When the file is the only interface for an option, open the generated
+    file as a user would. The documentation described it wrong in two
+    places because no one did.
+  - A default value that is only reachable by uncommenting a line is not
+    configurable. If an option must be editable in the file, the file must
+    contain it as an active line.
+  - Read the header before calling an unfamiliar API. `StandardPaths::
+    fcitxPath` takes a compile-time directory name, not a type; the user
+    directory of a `StandardPathsType` is `userDirectory(type)`. Guessing
+    cost a failed test run and a probe.

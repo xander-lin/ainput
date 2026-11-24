@@ -75,8 +75,9 @@ mean" suggestion and type mismatches are named in the fcitx5 log, with the
 first provider-file issue repeated as a warning line in the switch
 notification.
 .SS Shared (fcitx5-configtool)
-The following options are stored by fcitx5 itself; the file only lists values
-that differ from their default.
+The following options are stored by fcitx5 itself. The file lists every
+option with its current value, so the ones hidden from the dialog can still
+be found and edited there.
 .TP
 \fBProvider\fP (default \fBqwen\fP)
 Active backend: qwen, doubao, zipformer, fire_red or mock.
@@ -100,8 +101,7 @@ none, speexdsp or deepfilter. deepfilter needs a helper binary at
 \fBCrestThreshold\fP (2.4), \fBMinActiveMsec\fP (250) and \fBLufsMargin\fP (4.2)
 are written to the file but hidden from the settings dialog: they are
 pipeline details rather than choices a user needs to make. Deleting the file
-and restarting fcitx5 regenerates it with every option and its default
-commented out.
+and restarting fcitx5 regenerates it with every option at its default value.
 .PP
 Four further options accept credentials and model ids so a fresh install can
 be configured entirely here: \fBQwenApiKey\fP, \fBQwenModel\fP,

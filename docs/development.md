@@ -40,6 +40,7 @@ rust/            core: capture, DSP, ASR, config, uinput, diagnostics
 shell/           C++: AddonInstance, AinputConfig, key events, output handler
   ainput_core.h  the entire C ABI between the two halves
   status.h       the panel sentence for each error category
+  configfile.h   writes the configuration file with every option
 docs/            configuration, architecture, development, history
 udev/            /dev/uinput rule
 ```
@@ -53,7 +54,7 @@ with enum values copied from the headers.
 ## Tests
 
 ```bash
-meson test -C build          # Rust unit tests and three C++ tests, no hardware
+meson test -C build          # Rust unit tests and five C++ tests, no hardware
 cd rust && cargo test        # the Rust tests directly
 cargo test --lib -- --ignored   # records from the real microphone
 ```
@@ -62,12 +63,16 @@ The ignored test is the end-to-end check: it starts the engine, records 1.5 s,
 stops, and requires a callback (text or error) within 15 s. Run it after
 touching capture, the queue, or the callback plumbing.
 
-Meson also builds three C++ tests when the target can run executables:
+Meson also builds five C++ tests when the target can run executables:
 `delivery-order` (per-context FIFO), `status-text` (one panel sentence per
-error category) and `terminal-error-delivery`, which embeds a real fcitx5
-event loop with two input contexts: an outcome that arrives during a newer
-recording goes to the notification callback without touching the live
-status, and with nothing in flight it is shown in the panel.
+error category), `config-file` (every option is written as an active line,
+and an old-style file is told apart from a complete one),
+`terminal-error-delivery`, which embeds a real fcitx5 event loop with two
+input contexts: an outcome that arrives during a newer recording goes to the
+notification callback without touching the live status, and with nothing in
+flight it is shown in the panel; and `addon-config-file`, which loads the
+real addon into an embedded fcitx5 instance under a temporary `HOME` and
+checks the configuration file it writes on a first start and on an upgrade.
 
 Unit coverage by area:
 

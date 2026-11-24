@@ -40,8 +40,12 @@ should be asked to make:
 | `LufsMargin` | `4.2` | How far below `LufsTarget` the denoised audio may fall and still count as speech, in LUFS. `0` disables the check | *file only* |
 | `CrestThreshold` | `2.4` | Optional crest and VAD checks after denoising. `0` skips both checks. | *file only* |
 
-fcitx5 only writes options that differ from their default, so the file stays
-short. Missing options mean "default".
+The file lists every option with its current value, each under a comment
+that says what it does. A fresh install gets the file the first time the
+addon starts. After an upgrade it is rewritten once, if options are missing or
+an older version left defaults as comments (`#Key=value`); values already in
+the file are kept. Most tuning above is *file only*, so this file is the one
+place all of it can be seen and changed.
 
 ### The recording limit
 
@@ -226,12 +230,11 @@ rm ~/.config/fcitx5/conf/ainput.conf   # or move it aside
 fcitx5 -r
 ```
 
-`addon.conf` declares `Configurable=True`, and fcitx5 regenerates a complete
-file on load: every option appears, defaults as commented `#Key=value` lines
-and anything you had changed as `Key=value`. Do this while fcitx5 is
-**stopped** if you want a true factory reset — fcitx5 writes the in-memory
-configuration back on exit, so deleting the file under a running process just
-recreates it with the old values.
+The addon writes a complete file when it starts and finds none: every option
+appears with its default value. Do this while fcitx5 is **stopped** if you
+want a true factory reset — the addon writes the in-memory configuration back
+on exit, so deleting the file under a running process just recreates it with
+the old values.
 
 The per-provider JSON files self-heal the same way: delete one and the next
 recognition recreates it with every field, its default and comments.
