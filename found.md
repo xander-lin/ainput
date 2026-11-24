@@ -1243,3 +1243,25 @@
   repeating it: build, commit, rebuild from the commit, compare, then
   publish. The compiler and Rust outputs were already deterministic here;
   only the archive metadata varied.
+
+## 48. The prebuilt package shipped the binary without its license (found 2026-11)
+
+- **Mistake/context.** Building `fcitx5-ainput-bin` 0.1.2 from its AUR
+  repository showed three files missing against the `-git` package:
+  `LICENSE` and the two READMEs. The release artifact was a plain
+  `meson install` image, and only `PKGBUILD`'s `package()` added those
+  three. `AGENTS.md` and `docs/development.md` said the two packages
+  install identical files. The MIT license asks for its notice to travel
+  with copies, so every prebuilt package since 0.1.0 was missing it.
+- **Root cause.** The two packages were built from two file lists that were
+  never compared: `meson install` for one, `meson install` plus three
+  `install` lines for the other. The claim of identical files was written
+  from intent and checked against neither.
+- **Correction.** `make-release.sh` stages the same three files into the
+  artifact, at the paths `PKGBUILD` uses, so the archive's file set equals
+  the `-git` package's. The 0.1.2 artifact was already published; the fix
+  reaches users with the next release.
+- **Prevention.** After building an AUR package, compare its file list with
+  the package it conflicts with (`bsdtar -tf` of the built package,
+  `pacman -Ql` of the installed one). A package built from an install image
+  needs everything the other package adds by hand.

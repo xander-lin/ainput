@@ -80,6 +80,14 @@ fi
 # would silently make the package grow without being used.
 find "$stage" -type f | sort
 
+# The files PKGBUILD's package() adds for the -git package. Without them the
+# prebuilt package shipped the binary without its license and READMEs
+# (found.md #48), and the two packages did not install the same files.
+for file in README.md README.zh-CN.md; do
+    install -Dm644 "$root/$file" "$stage/usr/share/doc/fcitx5-ainput/$file"
+done
+install -Dm644 "$root/LICENSE" "$stage/usr/share/licenses/fcitx5-ainput/LICENSE"
+
 mkdir -p "$dist"
 # The archive carries no build time, file order or user name, so two builds of
 # one commit give the same bytes and the checksum in PKGBUILD.bin can be
