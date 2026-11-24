@@ -81,7 +81,13 @@ fi
 find "$stage" -type f | sort
 
 mkdir -p "$dist"
-tar --zstd -cf "$dist/$name.tar.zst" -C "$stage" usr
+# The archive carries no build time, file order or user name, so two builds of
+# one commit give the same bytes and the checksum in PKGBUILD.bin can be
+# confirmed by rebuilding from the tag. Files are dated with the release date
+# in the man page, the one date the source tree holds.
+epoch=${SOURCE_DATE_EPOCH:-$(date -u -d "$(sed -n 's/^\.TH ainput 1 "\([^"]*\)".*/\1/p' "$root/docs/ainput.1") UTC" +%s)}
+tar --zstd -cf "$dist/$name.tar.zst" -C "$stage" usr \
+    --sort=name --owner=0 --group=0 --numeric-owner --mtime="@$epoch"
 rm -rf "$stage"
 (cd "$dist" && sha256sum "$name.tar.zst" | tee "$name.tar.zst.sha256")
 

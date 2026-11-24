@@ -112,7 +112,8 @@ who want fast push-to-talk dictation without leaving the keyboard.
 - Do not reintroduce per-module readmes, `WhyThisArchWork.md` files, a generic
   fcitx5 tutorial set, or a `tools/` directory of one-off probes; those were
   removed in 2026-10. Hardware checks are the ignored Rust test plus the
-  diagnostic log.
+  diagnostic log. `tools/` is for the release chain only: the sysroot, the
+  cross build, its symbol check and the artifact.
 - Durable claims (archive name, download size, config path, default value,
   test count) are verified against the code or the upstream API before they
   ship. See `found.md` #12.
@@ -145,9 +146,13 @@ who want fast push-to-talk dictation without leaving the keyboard.
   The web page (`/packages/<name>`) flips over **before** the RPC index does,
   so when RPC still says `resultcount: 0` check the page before assuming the
   push failed.
-- aarch64 is cross-compiled (`tools/cross-aarch64.sh`), not tested: there is no
-  arm machine. Only the object format, the dependency list and the exported
-  symbols are verified. Say so in release notes rather than implying support.
+- aarch64 is cross-compiled (`tools/cross-aarch64.sh` against a sysroot from
+  `tools/make-sysroot.sh`), not tested: there is no arm machine. Verified are
+  the object format, the dependency list, the exported addon entry point, and
+  that every strong import is defined by the current Arch Linux ARM
+  libraries. Say so in release notes rather than implying support. The
+  sysroot lives outside `/tmp` (tmpfs), in the checkout's ignored
+  `build-sysroot/`.
 - The prebuilt artifacts require **glibc 2.39+** (linked on current Arch). Keep
   that in the README: a user on an older system must use `-git`.
 - Renaming a package on AUR is not possible; the procedure is: publish the new

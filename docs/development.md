@@ -43,6 +43,8 @@ shell/           C++: AddonInstance, AinputConfig, key events, output handler
   configfile.h   writes the configuration file with every option
 docs/            configuration, architecture, development, history
 udev/            /dev/uinput rule
+tools/           release: make-sysroot.sh, cross-aarch64.sh, check-symbols.sh,
+                 make-release.sh
 ```
 
 PulseAudio and libcurl use the maintained `libpulse-binding` and `curl` crates;
@@ -192,13 +194,15 @@ numbers that will be stale after the next change.
 
 ## Repository conventions
 
-Tracked: `rust/`, `shell/`, `docs/`, `udev/`, `meson.build`,
-`meson_options.txt`, `PKGBUILD`, `PKGBUILD.install`, `.SRCINFO`, `README.md`,
-`README.zh-CN.md`, `LICENSE`, `AGENTS.md`, `found.md`.
+Tracked: `rust/`, `shell/`, `docs/`, `udev/`, `tools/`, `meson.build`,
+`meson_options.txt`, `PKGBUILD`, `PKGBUILD.bin`, `PKGBUILD.install`,
+`.SRCINFO`, `README.md`, `README.zh-CN.md`, `LICENSE`, `AGENTS.md`,
+`found.md`.
 
-Never tracked: `build*/`, `rust/target/`, `compile_commands.json`, `pkg/`,
-`src/` (makepkg), `*.pkg.tar.*`, `.venv/`, `~/.config` or `~/.cache` contents,
-models, diagnostic logs, editor state (`.idea/`, `.vscode/`).
+Never tracked: `build*/` (including `build-sysroot/`), `dist/`,
+`rust/target/`, `compile_commands.json`, `pkg/`, `src/` (makepkg),
+`*.pkg.tar.*`, `.venv/`, `~/.config` or `~/.cache` contents, models,
+diagnostic logs, editor state (`.idea/`, `.vscode/`).
 
 `.gitignore` anchors root-only entries with `/`; a bare `src/` would also hide
 `rust/src` and `shell/`. See `found.md` #13 — verify with
@@ -235,36 +239,48 @@ and `provides=(fcitx5-ainput)`. Only one can be installed.
 
 #### Cutting a release
 
-1. Bump the version in `meson.build`, `rust/Cargo.toml` and `PKGBUILD`, and the
-   man page date/version in `docs/ainput.1`. Regenerate `rust/Cargo.lock`.
-2. Build both architectures:
+1. Bump the version in `meson.build`, `rust/Cargo.toml` and `PKGBUILD`
+   (`pkgver()`), and the man page date/version in `docs/ainput.1`. Regenerate
+   `rust/Cargo.lock` with `cargo update -w`, which touches the workspace
+   packages only.
+2. Build the commit that will be tagged in a clean checkout
+   (`git worktree add --detach <dir> <commit>`), not in the working tree, so
+   the artifacts contain exactly what the tag does:
    ```bash
-   meson setup build --buildtype=release && ninja -C build
-   tools/cross-aarch64.sh <aarch64-sysroot> <version>
-   ```
-   The cross script needs a sysroot with the target's headers, link-time `.so`
-   files, and pkg-config metadata, including libcurl's private pkg-config
-   requirements. It refuses to publish when the aarch64 dependency list
-   differs from the native one. Meson builds the C++ tests when the target
-   executables can run.
-3. Produce the artifacts and their checksums:
-   ```bash
+   meson setup build --prefix=/usr --buildtype=release
+   ninja -C build && meson test -C build
+   tools/make-sysroot.sh <sysroot-dest>      # once; reused by later releases
+   tools/cross-aarch64.sh <sysroot-dest>/sysroot <version>
    tools/make-release.sh <version> x86_64
-   tools/make-release.sh <version> aarch64
    ```
-   It refuses to publish if `ainput.so` is not staged. That guard exists
-   because meson prepends `PKG_CONFIG_SYSROOT_DIR` to install paths, which once
-   produced a tarball containing everything except the addon.
-4. Put the two sha256 values into `PKGBUILD.bin` (`sha256sums_x86_64`,
-   `sha256sums_aarch64`) and push `PKGBUILD.bin` + `PKGBUILD.install` to the
-   `-bin` AUR repo with a regenerated `.SRCINFO`.
-5. Tag and publish:
+   The cross script builds `build-aarch64`, checks the result and runs
+   `make-release.sh` for aarch64 itself; it compares the dependency list with
+   the native `build/`, so that build has to exist. `make-release.sh` refuses
+   to publish without a staged `ainput.so`, because meson prepends
+   `PKG_CONFIG_SYSROOT_DIR` to install paths in a cross build, which once
+   produced a tarball without the addon. `<sysroot-dest>` must not be under
+   `/tmp`: that is tmpfs, and the sysroot for 0.1.1 was gone at the next boot
+   (`found.md` #44).
+3. Put the two sha256 values into `PKGBUILD.bin` (`sha256sums_x86_64`,
+   `sha256sums_aarch64`) and commit. `PKGBUILD.bin` is not a build input and
+   the archive carries no build time, so a clean rebuild of this commit gives
+   the same checksums on the same toolchain; confirm that before tagging. Tag
+   it and push it to both remotes:
    ```bash
    git tag -a <version> -m "..." && git push origin master <version>
+   git push gitee master <version>
+   ```
+4. Publish before any AUR package points at the artifacts:
+   ```bash
    gh release create <version> dist/*.tar.zst dist/*.sha256
    ```
-6. Keep the static `pkgver=` placeholder in `PKGBUILD` current and regenerate
-   its `.SRCINFO` before pushing to the `-git` AUR repo.
+5. Push `PKGBUILD.bin` (as `PKGBUILD`) and `PKGBUILD.install` to the `-bin`
+   AUR repo with a regenerated `.SRCINFO`. Build from that clone once before
+   pushing: `makepkg` downloads the artifacts from the release and checks the
+   checksums, which is the only test of the published URL.
+6. Keep the static `pkgver=` placeholder in `PKGBUILD` at the tag
+   (`<version>.r<count>.<commit>`) and regenerate its `.SRCINFO` before
+   pushing to the `-git` AUR repo.
 
 The release URL uses the tag verbatim (`/releases/download/<version>/`). A
 `v` prefix there produces a 404 that only shows up when building the package
@@ -273,6 +289,9 @@ from the published release, never from a local copy of the artifact.
 #### Architecture support
 
 `x86_64` is built and tested on the development machine. `aarch64` is
-cross-compiled; it is **not** run on arm hardware, so only the object format,
-the dependency list and the exported symbols are checked. Treat aarch64 as
-"should work, unverified" until someone reports otherwise.
+cross-compiled; it is **not** run on arm hardware. What is checked: the
+object format, the dependency list against the x86_64 build, the exported
+`fcitx_addon_factory_instance`, and that every strong import, by name and
+version, is defined by a library the addon loads, out of the current Arch
+Linux ARM packages. Treat aarch64 as "should work, unverified" until someone
+reports otherwise.

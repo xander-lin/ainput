@@ -1,8 +1,10 @@
 # Cross-compilation settings for the release artifacts.
 #
 # The addon links the system libraries dynamically, so a cross build needs the
-# target's headers and link-time .so stubs, not a static toolchain. Point
-# AINPUT_SYSROOT at an aarch64 sysroot (tools/cross-aarch64.sh builds one).
+# target's headers and link-time .so stubs, not a static toolchain. The -sys
+# crates find them through pkg-config: PKG_CONFIG_SYSROOT_DIR and
+# PKG_CONFIG_LIBDIR, which tools/cross-aarch64.sh exports for a sysroot that
+# tools/make-sysroot.sh builds.
 #
 # Nothing here affects a native build: these sections only apply when the
 # target triple matches.

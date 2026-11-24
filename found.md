@@ -1132,3 +1132,114 @@
   agent tool invocation. Verify the process remains alive after the invoking
   command exits, and investigate Rust `eprintln!` failure separately before
   assuming logging can never affect capture.
+
+## 44. The aarch64 sysroot existed only in /tmp, with no way to rebuild it (found 2026-11)
+
+- **Mistake/context.** Cutting 0.1.2 stopped at the cross build. The only
+  aarch64 sysroot on the machine had been `/tmp/opencode/alarm/sysroot`,
+  which the meson log of the 0.1.0 cross build records. `/tmp` is tmpfs and
+  the machine had rebooted; the directory was gone. Nothing recorded how it
+  was made: `docs/development.md` took `<aarch64-sysroot>` as an argument,
+  and the comment in `rust/.cargo/config.toml` said `tools/cross-aarch64.sh`
+  builds one, which it never did. The same comment told the reader to point
+  `AINPUT_SYSROOT` at it; the cross script exported that variable and nothing
+  read it, the `-sys` crates use `PKG_CONFIG_SYSROOT_DIR`. Without a sysroot
+  the `-bin` package would have pointed aarch64 users at a 404.
+- **Root cause.** A prerequisite of every release was treated as a one-off:
+  assembled by hand for one release, in a RAM-backed directory, and described
+  by a comment that named a script without that job. Same class as #17, a
+  description of something no code creates.
+- **Correction.** `tools/make-sysroot.sh` builds the sysroot from the Arch
+  Linux ARM repositories: pacman resolves the dependency closure without
+  root (`-Sp`), curl downloads it into a cache that later runs reuse, and the
+  packages are extracted into `sysroot/usr` and `sysroot/target-runtime`.
+  `docs/development.md` names the command and says where the output must
+  live.
+- **Prevention.** Whatever each release needs is a script in `tools/` and a
+  line in "Cutting a release". Build inputs and caches live where a reboot
+  cannot remove them, in the checkout's ignored `build-*/` directories. A
+  comment that says a tool builds something must name a tool that does;
+  check it with the same search that would find the code.
+
+## 45. The cross build claimed a check it did not run (found 2026-11)
+
+- **Mistake/context.** The header of `tools/cross-aarch64.sh` said the build
+  proved that the artifact "exports the symbols fcitx5 loads". No line
+  checked that; the script compared the file type and the NEEDED list and
+  then packaged. The binary was also linked against the build host's cross
+  toolchain (glibc 2.44, GCC 16.2) while Arch Linux ARM shipped glibc 2.43
+  and GCC 16.1.1. A reference to a symbol version only the newer libraries
+  define would link cleanly and then fail to load on every ALARM system.
+  That is a hazard, not an observed failure: the 0.1.1 artifact passes the
+  check below.
+- **Root cause.** Meson links with `--no-undefined`, so an unresolved
+  reference fails the build, but only against the libraries present at link
+  time. For a target nobody can run, the verification was written as prose,
+  and nothing compared the link-time libraries with the ones the target
+  systems have. The two sets drift because the cross toolchain follows Arch
+  while Arch Linux ARM rebuilds on its own schedule.
+- **Correction.** The cross script stops unless `fcitx_addon_factory_instance`
+  is exported, and runs `tools/check-symbols.sh`: every strong import, by
+  name and version, must be defined in a library the addon loads. The glibc,
+  libstdc++ and libgcc packages of Arch Linux ARM are extracted to
+  `target-runtime`, off the link path, for that check alone. For 0.1.2, 505
+  strong imports resolve against 53 libraries. The highest versions
+  referenced are GLIBC_2.39 and GLIBCXX_3.4.32; every GLIBC version above
+  2.34 comes from a weak import, which a loader may leave unresolved.
+- **Prevention.** A check that a comment promises is a command in the
+  script. For a cross build, test the output against the distribution's
+  libraries, not the toolchain's. Prove a new checker both ways before
+  trusting it: this one passes for the native build against `/usr/lib` and
+  fails for a directory without the libraries.
+
+## 46. Extracting part of a package archive (found 2026-11, while writing `make-sysroot.sh`)
+
+- **Mistake/context.** The first versions of the extraction step failed one
+  after another on the real packages, each with a different message: `xargs`
+  downloaded nothing, bsdtar stopped at a package without `usr/lib`, GNU
+  tar reported members "Not found in archive", and glibc's hard links had no
+  target. None of it showed up on the two packages tried first.
+- **Root cause.** Each tool has a rule that only matters on unusual names or
+  a partial extraction:
+  - `xargs -I{}` passes nothing when the command has no `{}`.
+  - `pacman -Sw` needs root; `-Sp` does not, and reads its databases from
+    `<dbpath>/sync/`.
+  - bsdtar `--include` fails when a pattern matches nothing, and `-T` in
+    extract mode is a pattern list: a member with `[`, `*` or `?` is not
+    found, and a backslash cannot be escaped.
+  - `tar -tf` and `bsdtar -tf` print escaped names;
+    `tar --quoting-style=literal` prints them as they are.
+  - GNU tar reads the archive once, so a `-T` list out of archive order
+    fails. A directory entry extracts its whole subtree, and a hard link
+    needs its target extracted first (glibc's `usr/lib/getconf/*` link to
+    `usr/bin/getconf`).
+- **Correction.** The script lists each archive with
+  `tar --quoting-style=literal`, selects the `usr/include` and `usr/lib`
+  directory entries plus hard-link targets outside them, keeps archive
+  order, and extracts with `tar --no-wildcards --verbatim-files-from -T`.
+- **Prevention.** Try a new extraction path on a synthetic archive with such
+  names and a hard link before running it on 175 packages. Never add
+  `|| true` around the step that reported "Error exit delayed from previous
+  errors"; the error was the only sign of a missing member.
+
+## 47. A rebuild of the release gave different checksums (found 2026-11)
+
+- **Mistake/context.** 0.1.2 was tagged with the checksums of a first build.
+  A clean rebuild from the tag gave other bytes, and a third build a third
+  pair, although every file inside was identical (the extracted trees were
+  compared with `sha256sum`). Nothing could show that a published binary was
+  the one built from the tag, and a second run of `make-release.sh` alone
+  had invalidated the checksums in the tag.
+- **Root cause.** `tar` stored what it found: the install time as every
+  mtime, the build user's name and id, and the directory order of the
+  staging tree. `docs/development.md` had just started to say that the
+  artifacts are those of the commit, without a rebuild behind it.
+- **Correction.** `make-release.sh` writes the archive with `--sort=name`,
+  `--owner=0 --group=0 --numeric-owner` and the man page date as mtime
+  (`SOURCE_DATE_EPOCH` overrides). Two clean builds of one commit give the
+  same checksums. That holds for one toolchain; another compiler or Rust
+  version can give other bytes.
+- **Prevention.** A claim that a build can be repeated is made after
+  repeating it: build, commit, rebuild from the commit, compare, then
+  publish. The compiler and Rust outputs were already deterministic here;
+  only the archive metadata varied.
